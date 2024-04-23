@@ -132,3 +132,5 @@ dmypy.json
 /data
 bee_vs_wasp.tar.gz
 data/
+data.yaml
+fruits_detection_data.yaml
