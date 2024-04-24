@@ -134,3 +134,6 @@ bee_vs_wasp.tar.gz
 data/
 data.yaml
 fruits_detection_data.yaml
+fruits_detection.zip
+datasets/
+archive.zip
