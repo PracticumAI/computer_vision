@@ -137,3 +137,6 @@ fruits_detection_data.yaml
 fruits_detection.zip
 datasets/
 archive.zip
+/runs
+runs/
+yolov8n.pt
