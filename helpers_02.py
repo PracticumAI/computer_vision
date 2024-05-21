@@ -1,4 +1,8 @@
+import requests
 import os
+import time
+import tarfile
+import zipfile
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -36,6 +40,7 @@ def extract_file(filename, data_folder):
             # Extract all the files to the data folder
             zip_ref.extractall(data_folder)
             # Print a success message
+            print(f"Extracted {filename} to {data_folder} successfully.")
     else:
         # Print an error message
         print(f"{filename} is not a valid tar or zip file.")
@@ -68,11 +73,11 @@ def manage_data(url="https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits
 
     if answer.lower() == 'yes':
         print('Downloading data, this may take a minute.')
-        download_file()
+        download_file(url, filename)
         print('Data downloaded, unpacking')
         extract_file(filename, dest)
-        print('Data downloaded and unpacked. Now available at {os.path.join(data,folder_name)}.')
-        return os.path.normpath(os.path.join(data,folder_name))   
+        print(f'Data downloaded and unpacked. Now available at {os.path.join(dest,folder_name)}.')
+        return os.path.normpath(os.path.join(dest,folder_name))   
 
     print('Sorry, I cannot find the data. Please download it manually from https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits_detection.zip and unpack it to the data folder.')      
 

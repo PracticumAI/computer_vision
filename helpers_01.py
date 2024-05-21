@@ -1,4 +1,7 @@
+import requests
 import os
+import time
+import tarfile
 import tensorflow as tf
 import numpy as np
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
