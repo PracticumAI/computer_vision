@@ -27,8 +27,8 @@ def extract_file(filename, data_folder):
     if tarfile.is_tarfile(filename):
         # Open the tar file
         tar = tarfile.open(filename, "r:gz")
-        # Extract all the files to the data folder
-        tar.extractall(data_folder)
+        # Extract all the files to the data folder, filter for security
+        tar.extractall(data_folder, filter='data')
         # Close the tar file
         tar.close()
         # Print a success message
@@ -37,7 +37,7 @@ def extract_file(filename, data_folder):
         # Print an error message
         print(f"{filename} is not a valid tar file.")
     
-def manage_data(folder_name='bee_vs_wasp'):
+def manage_data(url="https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.gz?dl=1", filename="bee_vs_wasp.tar.gz", folder_name='bee_vs_wasp', dest='data'):
     '''Try to find the data for the exercise and return the path'''
     
     # Check common paths of where the data might be on different systems
@@ -64,40 +64,12 @@ def manage_data(folder_name='bee_vs_wasp'):
     answer = input('Do you want to download the data? (yes/no): ')
 
     if answer.lower() == 'yes':
-
-        ''' Check and see if the downloaded data is inside the .gitignore file, and adds them to the list of files to ignore if not. 
-        This is to prevent the data from being uploaded to the repository, as the files are too large for GitHub.'''
-        
-        if os.path.exists('.gitignore'):
-            with open('.gitignore', 'r') as f:
-                ignore = f.read().split('\n')
-        # If the .gitignore file does not exist, create a new one
-        elif not os.path.exists('.gitignore'):
-            with open('.gitignore', 'w') as f:
-                f.write('')
-            ignore = []
-        else:
-            ignore = []
-
-        # Check if the .gz file is in the ignore list
-        if 'bee_vs_wasp.tar.gz' not in ignore:
-            ignore.append('bee_vs_wasp.tar.gz')
-            
-        # Check if the data/ folder is in the ignore list
-        if 'data/' not in ignore:
-            ignore.append('data/')
-
-        # Write the updated ignore list back to the .gitignore file
-        with open('.gitignore', 'w') as f:
-            f.write('\n'.join(ignore))
-
-        print("Updated .gitignore file.")
         print('Downloading data, this may take a minute.')
         download_file()
         print('Data downloaded, unpacking')
-        extract_file("bee_vs_wasp.tar.gz", "data")
-        print('Data downloaded and unpacked. Now available at data/bee_vs_wasp.')
-        return os.path.normpath('data/bee_vs_wasp')   
+        extract_file(filename, dest)
+        print('Data downloaded and unpacked. Now available at {os.path.join(data,folder_name)}.')
+        return os.path.normpath(os.path.join(data,folder_name))   
 
     print('Sorry, I cannot find the data. Please download it manually from https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.gz and unpack it to the data folder.')      
 
