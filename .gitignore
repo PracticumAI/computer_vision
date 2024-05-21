@@ -1,5 +1,6 @@
-# Tensorboard log folder
+# Tensorboard log and YOLO runs folders
 logs/
+runs/
 
 # data folder and fruits_detection file
 data/
