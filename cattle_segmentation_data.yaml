@@ -1,0 +1,10 @@
+names:
+- Cow
+- Horse
+- Pig
+- Sheep
+- Undefined
+num_classes: 5
+test: cattle_segmentation/cattle_segmentation_clean.yolov8/test/images
+train: cattle_segmentation/cattle_segmentation_clean.yolov8/train/images
+val: cattle_segmentation/cattle_segmentation_clean.yolov8/valid/images
