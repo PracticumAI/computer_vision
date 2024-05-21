@@ -1,6 +1,10 @@
 # Tensorboard log folder
 logs/
 
+# data folder and fruits_detection file
+data/
+fruits_detection.zip
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
