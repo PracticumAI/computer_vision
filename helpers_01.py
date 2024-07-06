@@ -77,6 +77,13 @@ def manage_data(url="https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.g
     print('Sorry, I cannot find the data. Please download it manually from https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.gz and unpack it to the data folder.')      
 
 
+def count_class(counts, batch, classes):
+    '''Count number of samples per class in a batch'''
+    for i in range(classes):
+        cc = tf.cast(batch[1] == i, tf.int32)
+        counts[i] += tf.reduce_sum(cc)
+
+
 def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):
     '''Takes a path, batch size, target shape for images and optionally whether to show sample images.
        Returns training and testing datasets
@@ -145,6 +152,22 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):
                     plt.title(class_name)
                     plt.axis("off")
             plt.show()
+            
+  
+    #Get and print counts by class
+    # Initialize counts
+    counts = [0] * len(X_train.class_names)
+    class_names=list(X_train.class_names)
+    
+    # Iterate through the dataset batch by batch
+    for batch in X_train:
+        count_class(counts, batch, len(X_train.class_names))
+    
+    total=sum(counts)
+    # Print the counts
+    for i, count in enumerate(counts):
+        print(f"Category {class_names[i]}: {count} images or {count/total*100:.1f}% of total images.")
+      
     return X_train, X_test
 
 def load_optimizer(optimizer_name):
@@ -180,8 +203,12 @@ def compile_train_model(X_train, X_test, model,
     model.compile(optimizer=opt,
                   loss=loss,
                   metrics=['accuracy'])
+    
+    # Calculate Class Weights to manage imballance in the dataset
+    
+    
     # Train the model
-    history = model.fit(X_train, epochs=epochs, validation_data=X_test, callbacks=[callbacks])
+    history = model.fit(X_train, epochs=epochs, validation_data=X_test, class_weight=class_weight, callbacks=[callbacks])
     
     return model, history
 
