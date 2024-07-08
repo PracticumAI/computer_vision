@@ -84,7 +84,7 @@ def count_class(counts, batch, classes):
         counts[i] += tf.reduce_sum(cc)
 
 
-def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):
+def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True, return_cls_counts=False):
     '''Takes a path, batch size, target shape for images and optionally whether to show sample images.
        Returns training and testing datasets
     '''
@@ -93,6 +93,7 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):
     print(f"  - Loading the dataset from: {path}.")
     print(f"  - Using a batch size of: {batch_size}.")
     print(f"  - Resizing input images to: {shape}.")
+    print(f"  - Returning class counts for later use? {return_cls_counts}")
     print("***********************************************************************")
     # Define the directory path
     directory_path = path
@@ -155,20 +156,28 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):
             
   
     #Get and print counts by class
+    print("\nGetting number of images per class. This may take a bit...")
     # Initialize counts
     counts = [0] * len(X_train.class_names)
     class_names=list(X_train.class_names)
     
-    # Iterate through the dataset batch by batch
+    # Iterate through the training dataset batch by batch
     for batch in X_train:
         count_class(counts, batch, len(X_train.class_names))
     
     total=sum(counts)
+    
+    cls_counts={}
     # Print the counts
+    print("\nFor the Training set:")
     for i, count in enumerate(counts):
         print(f"Category {class_names[i]}: {count} images or {count/total*100:.1f}% of total images.")
-      
-    return X_train, X_test
+        cls_counts[i]=count
+    
+    if return_cls_counts:
+        return X_train, X_test, cls_counts
+    else:
+        return X_train, X_test
 
 def load_optimizer(optimizer_name):
     '''Takes an optimizer name as a string and checks if it's valid'''
@@ -183,17 +192,30 @@ def load_optimizer(optimizer_name):
 
 def compile_train_model(X_train, X_test, model,
                         loss=SparseCategoricalCrossentropy(from_logits=True),
-                        optimizer='Adam', learning_rate=0.0001, epochs=10, callbacks=[]):
+                        optimizer='Adam', learning_rate=0.0001, epochs=10, weights=False, callbacks=[]):
     '''Compiles and trains the model. 
           Takes in an X_train, X_test, model, loss function, optimizer, learning rate,
-          and epochs.
+          epochs, if class weights should be used, and a list of callbacks.
           Returns the compiled model and training history.'''
+    
+    num_classes = len(X_train.class_names)
+    
+    if weights:
+        # Calculate Class Weights to manage imballance in the dataset
+        print("Feature not yet implemented....sorry!")
+    else:
+        weight_list = [1] * num_classes # Create a list of 1s as long as number of classes
+        class_indices = range(num_classes)
+        class_weight = dict(zip(class_indices, weight_list))  
+    
+
     print("***********************************************************************")
     print("Compile and Train the model:")
     print(f"  - Using the loss function: {loss}.")
     print(f"  - Using the optimizer: {optimizer}.")
     print(f"  - Using learning rate of: {learning_rate}.")
     print(f"  - Running for {epochs} epochs.")
+    print(f"   -Using class weights: {class_weight})")
     print(f"  - Using these callbacks: {callbacks}")
     print("***********************************************************************")
     # Compile the model
@@ -204,9 +226,7 @@ def compile_train_model(X_train, X_test, model,
                   loss=loss,
                   metrics=['accuracy'])
     
-    # Calculate Class Weights to manage imballance in the dataset
-    
-    
+
     # Train the model
     history = model.fit(X_train, epochs=epochs, validation_data=X_test, class_weight=class_weight, callbacks=[callbacks])
     
