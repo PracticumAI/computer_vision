@@ -168,3 +168,7 @@ cython_debug/
 #.idea/
 
 bee_vs_wasp.tar.gz
+data/
+/data
+datasets/
+/datasets
