@@ -191,7 +191,7 @@ def load_optimizer(optimizer_name):
         raise ValueError(f"Invalid optimizer name: {optimizer_name}")
 
 def compile_train_model(X_train, X_test, model,
-                        loss=SparseCategoricalCrossentropy(from_logits=True),
+                        loss=SparseCategoricalCrossentropy(from_logits=False),
                         optimizer='Adam', learning_rate=0.0001, epochs=10, weights=False, callbacks=[]):
     '''Compiles and trains the model. 
           Takes in an X_train, X_test, model, loss function, optimizer, learning rate,
