@@ -29,7 +29,7 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True,
                       stratify=True, return_cls_counts=False):
     '''Takes info on how to load and process images.
        Returns training and testing datasets. 
-       If retern_cls_counts=True, this is also returned as 3rd value.
+       If return_cls_counts=True, this is also returned as 3rd value.
     '''
     print("***********************************************************************")
     print("Load data:")
@@ -37,7 +37,7 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True,
     print(f"  - Using a batch size of: {batch_size}.")
     print(f"  - Resizing input images to: {shape}.")
     print(f"  - Stratify when sampling? {stratify}")
-    print(f"  - Returning class counts to calculate wieghts? {return_cls_counts}")
+    print(f"  - Returning class counts to calculate weights? {return_cls_counts}")
     print("***********************************************************************")
     
     batch_size = batch_size  # Define the batch size
@@ -69,7 +69,7 @@ def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True,
         cls_counts[class_name]=labels.count(class_name)
         
     # We originally used the image_dataset_from_directory function. That
-    # doesn't suppot stratification. So, we're changing to use a dataframe
+    # doesn't support stratification. So, we're changing to use a dataframe
     # and an ImageDataGenerator.
           
     if stratify: # Use sklearn's train_test_split function to split the data 
@@ -208,7 +208,7 @@ def compile_train_model(X_train, X_test, model,
         class_weights = dict(zip(class_indices, cls_wt))  
     
     else:
-        # Calculate class weights to deal with imballance
+        # Calculate class weights to deal with imbalance
         class_names = list(X_train.class_indices.keys())
         print(class_names)
         # Make a y from cls_counts
