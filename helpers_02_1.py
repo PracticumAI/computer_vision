@@ -259,9 +259,9 @@ def evaluate_model(train_set, val_set, model, history, num_classes=4):
     print("Evaluate the model:")
     print("***********************************************************************")
     # Evaluate the model
-    loss, accuracy = model.evaluate(train_set)
-    print(f'Test loss: {loss}')
-    print(f'Test accuracy: {accuracy}')
+    loss, accuracy = model.evaluate(val_set)
+    print(f'Validation loss: {loss}')
+    print(f'Validation accuracy: {accuracy}')
 
     # Plot the training and validation loss over time
     plt.plot(history.history['loss'], label='Training Loss')
