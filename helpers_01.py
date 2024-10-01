@@ -17,9 +17,15 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 
-from tensorflow.keras.models import Sequential  # Import the Sequential model: a linear stack of layers from Keras module in TensorFlow.
-from tensorflow.keras.layers import Dense  # Import the Dense layer: a fully connected neural network layer from Keras module in TensorFlow.
-from tensorflow.keras.layers import Flatten  # Import the Flatten layer: used to convert input data into a 1D array from Keras module in TensorFlow.
+# Import the Sequential model: a linear stack of layers 
+# from Keras module in TensorFlow.
+from tensorflow.keras.models import Sequential
+# Import the Dense layer: a fully connected neural network layer 
+# from Keras module in TensorFlow.
+from tensorflow.keras.layers import Dense
+# Import the Flatten layer: used to convert input data into a 1D array 
+# from Keras module in TensorFlow.
+from tensorflow.keras.layers import Flatten
 from tensorflow.keras.utils import to_categorical
 from tensorflow.keras import layers 
 from tensorflow.keras import losses
@@ -28,6 +34,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.utils import class_weight
+
 
 def download_file(url, filename):
     """Download a file from a URL and save it to the current directory"""
@@ -196,7 +203,7 @@ def load_display_data(
         )
     else:
         # Split the data randomly
-        X_train, X_val = train_test_split(images, test_size=0.2)
+        X_train, X_val, y_train, y_val = train_test_split(images, labels, test_size=0.2)
 
     # Build the DataFrames for the training and validation sets
     train_df = pd.DataFrame(list(zip(X_train, y_train)), columns=["image", "class"])
@@ -310,6 +317,7 @@ def make_model(activation='relu', shape=(80,80,3), num_classes=4):
 
     return model
 
+
 def compile_train_model(
     data_train,
     data_val,
@@ -342,7 +350,7 @@ def compile_train_model(
         # Make a y from cls_counts
         y_vals = []
         for cls in list(data_train.class_indices.keys()):
-            y_vals += [data_train.class_indices[cls]] * int(cls_counts[cls])
+            y_vals += [data_train.class_indices[cls]] * int(weights[cls])
 
         cls_wt = class_weight.compute_class_weight('balanced', 
                                       classes=np.unique(y_vals), 
@@ -415,7 +423,7 @@ def evaluate_model(data_val, model, history, num_classes=4):
     plt.show()
 
     # Get the class names
-    class_names = data_val.class_names
+    class_names = list(data_val.class_indices.keys())
 
     # Make predictions on the test set
     y_pred = np.argmax(model.predict(data_val), axis=-1)
