@@ -155,9 +155,6 @@ def load_display_data(
     print(f"  - Returning class counts for later use? {return_cls_counts}")
     print("******************************************************************")
 
-    # Define the directory path
-    directory_path = path
-
     # Define the image size using the 1st 2 elements of the shape parameter
     # We don't need the number of channels here, just the dimensions to use
     image_size = shape[:2]
@@ -194,15 +191,15 @@ def load_display_data(
     if stratify:  # Use sklearn's train_test_split function to split the data
         # into training and testing sets
         # Split the data in a stratified manner
-        data_train, X_val, y_train, y_val = train_test_split(
+        X_train, X_val, y_train, y_val = train_test_split(
             images, labels, test_size=0.2, stratify=labels
         )
     else:
         # Split the data randomly
-        data_train, X_val = train_test_split(images, test_size=0.2)
+        X_train, X_val = train_test_split(images, test_size=0.2)
 
     # Build the DataFrames for the training and validation sets
-    train_df = pd.DataFrame(list(zip(data_train, y_train)), columns=["image", "class"])
+    train_df = pd.DataFrame(list(zip(X_train, y_train)), columns=["image", "class"])
     val_df = pd.DataFrame(list(zip(X_val, y_val)), columns=["image", "class"])
 
     # Define the ImageDataGenerator class with rescaling for each channel
