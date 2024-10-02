@@ -12,18 +12,16 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-import tensorflow as tf
-
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 from tensorflow.keras.losses import SparseCategoricalCrossentropy
 
-# Import the Sequential model: a linear stack of layers 
+# Import the Sequential model: a linear stack of layers
 # from Keras module in TensorFlow.
 from tensorflow.keras.models import Sequential
-# Import the Dense layer: a fully connected neural network layer 
+# Import the Dense layer: a fully connected neural network layer
 # from Keras module in TensorFlow.
 from tensorflow.keras.layers import Dense
-# Import the Flatten layer: used to convert input data into a 1D array 
+# Import the Flatten layer: used to convert input data into a 1D array
 # from Keras module in TensorFlow.
 from tensorflow.keras.layers import Flatten
 from tensorflow.keras.utils import to_categorical
@@ -255,7 +253,8 @@ def load_display_data(
             # Filter images of the current class
             class_images = images[labels[:, i] == 1]
 
-            # Number of images to show. We don't want to show more than 3 images.
+            # Number of images to show.
+            # We don't want to show more than 3 images.
             num_images = min(len(class_images), 3)
 
             for j in range(num_images):
@@ -275,8 +274,8 @@ def load_display_data(
     if return_cls_counts:
         print(f"\nClass counts being returned: {cls_counts}.")
         return train_generator, val_generator, cls_counts
-    else:
-        return train_generator, val_generator
+
+    return train_generator, val_generator
 
 
 def load_optimizer(optimizer_name):
@@ -290,19 +289,23 @@ def load_optimizer(optimizer_name):
     # Raise an exception if the optimizer name is invalid
     raise ValueError(f"Invalid optimizer name: {optimizer_name}")
 
+
 def make_model(activation='relu', shape=(80,80,3), num_classes=4):
     '''Sets up a model. 
-          Takes in an activation function, shape for the input images, and number of classes.
-          Returns the model.'''
-    print("***********************************************************************")
+          Takes in an activation function, shape for the input images, 
+          and number of classes. Returns the model.'''
+    print("*****************************************************************")
     print("Make model:")
     print(f"  - Using the activation function: {activation}.")
     print(f"  - Model will have {num_classes} classes.")
-    print("***********************************************************************")
+    print("*****************************************************************")
 
     # Define the model
     model = tf.keras.Sequential([
-        layers.Conv2D(32, (3, 3), padding='same', activation=activation, input_shape=shape),
+        layers.Conv2D(
+            32, (3, 3), padding='same', activation=activation,
+            input_shape=shape
+        ),
         layers.MaxPooling2D((2, 2)),
         layers.Conv2D(64, (3, 3), padding='same', activation=activation),
         layers.MaxPooling2D((2, 2)),
@@ -340,7 +343,8 @@ def compile_train_model(
     class_indices = range(num_classes)
 
     if not weights:
-        cls_wt = [1] * num_classes # Create a list of 1s as long as number of classes
+        # Create a list of 1s as long as number of classes
+        cls_wt = [1] * num_classes 
         class_weights = dict(zip(class_indices, cls_wt))  
 
     else:
@@ -352,9 +356,11 @@ def compile_train_model(
         for cls in list(data_train.class_indices.keys()):
             y_vals += [data_train.class_indices[cls]] * int(weights[cls])
 
-        cls_wt = class_weight.compute_class_weight('balanced', 
-                                      classes=np.unique(y_vals), 
-                                      y=y_vals)
+        cls_wt = class_weight.compute_class_weight(
+            'balanced', 
+            classes=np.unique(y_vals), 
+            y=y_vals
+        )
 
         class_weights = dict(zip(class_indices, cls_wt))
 
