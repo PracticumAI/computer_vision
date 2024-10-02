@@ -435,10 +435,18 @@ def evaluate_model(data_val, model, history, num_classes=4):
     y_pred = np.argmax(model.predict(data_val), axis=-1)
 
     # Get the true labels
-    y_true = np.concatenate([y for x, y in data_val], axis=0)
+    num_val_samples = data_val.samples  # total number of validation samples
+    batch_size = data_val.batch_size  # batch size
+
+    # Calculate the number of batches
+    num_batches = np.ceil(num_val_samples / batch_size)
+    num_batches = int(num_batches)
+
+    # Get the true labels
+    y_true = np.concatenate([y for x, y in (next(data_val) for _ in range(num_batches))], axis=0)
 
     # Compute the confusion matrix
-    cm = confusion_matrix(y_true, y_pred)
+    cm = confusion_matrix(y_true.argmax(axis=1), y_pred)
 
     # Plot the confusion matrix
     plt.imshow(cm, cmap=plt.cm.Blues)
