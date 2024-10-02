@@ -443,7 +443,10 @@ def evaluate_model(data_val, model, history, num_classes=4):
     num_batches = int(num_batches)
 
     # Get the true labels
-    y_true = np.concatenate([y for x, y in (next(data_val) for _ in range(num_batches))], axis=0)
+    y_true = np.concatenate(
+        [y for x, y in (next(data_val) for _ in range(num_batches))],
+        axis=0
+    )
 
     # Compute the confusion matrix
     cm = confusion_matrix(y_true.argmax(axis=1), y_pred)
