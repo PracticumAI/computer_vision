@@ -8,25 +8,26 @@ import datetime
 import tarfile
 
 import tensorflow as tf
+import keras
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
-from tensorflow.keras.preprocessing.image import ImageDataGenerator
-from tensorflow.keras.losses import SparseCategoricalCrossentropy
+#from keras.preprocessing.image import ImageDataGenerator
+from keras.losses import SparseCategoricalCrossentropy
 
 # Import the Sequential model: a linear stack of layers
 # from Keras module in TensorFlow.
-from tensorflow.keras.models import Sequential
+from keras.models import Sequential
 # Import the Dense layer: a fully connected neural network layer
 # from Keras module in TensorFlow.
-from tensorflow.keras.layers import Dense
+from keras.layers import Dense
 # Import the Flatten layer: used to convert input data into a 1D array
 # from Keras module in TensorFlow.
-from tensorflow.keras.layers import Flatten
-from tensorflow.keras.utils import to_categorical
-from tensorflow.keras import layers 
-from tensorflow.keras import losses
+from keras.layers import Flatten
+from keras.utils import to_categorical
+from keras import layers 
+from keras import losses
 
 from sklearn.metrics import confusion_matrix 
 from sklearn.metrics import confusion_matrix
@@ -140,6 +141,10 @@ def count_class(counts, batch, classes):
         counts[i] += tf.reduce_sum(cc)
 
 
+def filter_class(image, label, class_id):
+    return label == class_id
+
+
 def load_display_data(
     path,
     batch_size=32,
@@ -180,78 +185,86 @@ def load_display_data(
             labels.append(class_name)
 
     # Print the number of number of images per class
-    print("\nFor the full dataset:")
+    print("\nFor the full dataset: ")
+    print("   Class          # of images     # of total")
+    print("--------------------------------------------")
     for class_name in class_names:
         print(
-            f"Number of {class_name} images: {labels.count(class_name)},"
-            f" or {labels.count(class_name)/len(labels)*100:.1f}%"
+            f"{class_name:>15} {labels.count(class_name):11}"
+            f"         {labels.count(class_name)/len(labels)*100:.1f}%"
         )
         # Save class count to return if requested
         cls_counts[class_name] = labels.count(class_name)
-
-    # We originally used the image_dataset_from_directory function. That
-    # doesn't support stratification. So, we're changing to use a DataFrame
-    # and an ImageDataGenerator.
-
-    if stratify:  # Use sklearn's train_test_split function to split the data
-        # into training and testing sets
-        # Split the data in a stratified manner
-        X_train, X_val, y_train, y_val = train_test_split(
-            images, labels, test_size=0.2, stratify=labels
+    print("--------------------------------------------")
+    
+    if stratify:  
+        # Create an image dataset
+        dataset = keras.utils.image_dataset_from_directory(
+            path,
+            labels='inferred',  # Assuming directory structure reflects classes
+            label_mode='int',
+            shuffle=False  # Do not shuffle to maintain order for splitting
         )
+
+        data_train = []
+        data_val = []
+
+        for label, count in cls_counts.items():
+            class_images = []
+            for image, labels in dataset:
+                if labels.numpy()[0] == label:
+                    class_images.append(image)
+
+            train_images, val_images = train_test_split(
+                class_images, test_size=0.2, stratify=class_images
+            )
+
+            data_train.extend(train_images) # Add this class's images to the 
+            data_val.extend(val_images)     # train_ and val_ datasets     
+        
     else:
         # Split the data randomly
-        X_train, X_val, y_train, y_val = train_test_split(images, labels, test_size=0.2)
-
-    # Build the DataFrames for the training and validation sets
-    train_df = pd.DataFrame(list(zip(X_train, y_train)), columns=["image", "class"])
-    val_df = pd.DataFrame(list(zip(X_val, y_val)), columns=["image", "class"])
-
-    # Define the ImageDataGenerator class with rescaling for each channel
-    # Normalizing the data is a good 1st step
-    train_datagen = ImageDataGenerator(rescale=1.0 / 255)
-    val_datagen = ImageDataGenerator(rescale=1.0 / 255)
-
-    # Define the training and validation data generators
-    # Note that the training/validation split was already done above,
-    # so, we are not using the validation_split here.
-    train_generator = train_datagen.flow_from_dataframe(
-        dataframe=train_df,
-        x_col="image",
-        y_col="class",
-        target_size=image_size,
+        data_train = tf.keras.preprocessing.image_dataset_from_directory(
+        path,
         batch_size=batch_size,
-        class_mode="categorical",
-        shuffle=True,
-    )
+        image_size=image_size,
+        validation_split=0.2,
+        subset='training',
+        seed=123,
+        labels='inferred',
+        label_mode='int'
+        )
 
-    val_generator = val_datagen.flow_from_dataframe(
-        dataframe=val_df,
-        x_col="image",
-        y_col="class",
-        target_size=image_size,
-        batch_size=batch_size,
-        class_mode="categorical",
-        shuffle=True,
-    )
+        data_val = tf.keras.preprocessing.image_dataset_from_directory(
+            path,
+            batch_size=batch_size,
+            image_size=image_size,
+            validation_split=0.2,
+            subset='validation',
+            seed=123,
+            labels='inferred',
+            label_mode='int'
+        )
 
     if show_pictures:
         # Get the class names
-        class_names = list(train_generator.class_indices.keys())
-        print(class_names)
+        class_names = list(data_train.class_names)
+        print(f'The classes in your dataset are: {class_names}')
 
         # Display up to 3 images from each of the categories
         for i, class_name in enumerate(class_names):
             plt.figure(figsize=(10, 10))
 
-            # Get a single batch to use for display
-            images, labels = train_generator.next()
+            # Get one batch to use for display
+            for images, labels in data_train.take(1):
+                break
 
-            # Un-normalize the images for display
-            images = images * 255
-
-            # Filter images of the current class
-            class_images = images[labels[:, i] == 1]
+            # Find indices of the desired class in this batch
+            mask = labels == i
+            # Select images of the desired class
+            class_images = tf.boolean_mask(images, mask)
+            # Convert TensorFlow tensors to NumPy arrays
+            class_images = np.array(class_images)
 
             # Number of images to show.
             # We don't want to show more than 3 images.
@@ -264,18 +277,11 @@ def load_display_data(
                 plt.axis("off")
             plt.show()
 
-    print("\nFor the training dataset:")
-    for class_name in class_names:
-        count = y_train.count(class_name)
-        print(
-            f"Number of {class_name} images: {count}, or {count/len(y_train)*100:.1f}%"
-        )
-
     if return_cls_counts:
         print(f"\nClass counts being returned: {cls_counts}.")
-        return train_generator, val_generator, cls_counts
+        return data_train, data_val, cls_counts
 
-    return train_generator, val_generator
+    return data_train, data_val
 
 
 def load_optimizer(optimizer_name):
@@ -290,29 +296,35 @@ def load_optimizer(optimizer_name):
     raise ValueError(f"Invalid optimizer name: {optimizer_name}")
 
 
-def make_model(activation='relu', shape=(80,80,3), num_classes=4):
+def make_model(
+        activation='relu',
+        shape=(80, 80, 3),
+        num_classes=4,
+        drouput_rate=0.2
+        ):
     '''Sets up a model. 
           Takes in an activation function, shape for the input images, 
-          and number of classes. Returns the model.'''
+          and number of classes and dropout rate. Returns the model.'''
     print("*****************************************************************")
     print("Make model:")
     print(f"  - Using the activation function: {activation}.")
     print(f"  - Model will have {num_classes} classes.")
+    print(f"  - Using a dropout rate of: {drouput_rate}.")
     print("*****************************************************************")
 
     # Define the model
     model = tf.keras.Sequential([
+        layers.Input(shape=shape),
         layers.Conv2D(
-            32, (3, 3), padding='same', activation=activation,
-            input_shape=shape
+            32, (3, 3), padding='same', activation=activation
         ),
         layers.MaxPooling2D((2, 2)),
         layers.Conv2D(64, (3, 3), padding='same', activation=activation),
         layers.MaxPooling2D((2, 2)),
-        layers.Dropout(0.2),
+        layers.Dropout(drouput_rate),
         layers.Conv2D(128, (3, 3), padding='same', activation=activation),
         layers.MaxPooling2D((2, 2), padding='same'),
-        layers.Dropout(0.2),
+        layers.Dropout(drouput_rate),
         layers.Flatten(),
         layers.Dense(128, activation=activation),
         layers.Dense(num_classes, activation='softmax')
@@ -325,7 +337,7 @@ def compile_train_model(
     data_train,
     data_val,
     model,
-    loss=SparseCategoricalCrossentropy(from_logits=True),
+    loss=SparseCategoricalCrossentropy(from_logits=False),
     optimizer="Adam",
     learning_rate=0.0001,
     epochs=10,
@@ -339,7 +351,7 @@ def compile_train_model(
     callbacks. Returns the compiled model and training history."""
 
     # Deal with class weights
-    num_classes = len(list(data_train.class_indices.keys()))
+    num_classes = len(list(data_train.class_names))
     class_indices = range(num_classes)
 
     if not weights:
@@ -373,8 +385,8 @@ def compile_train_model(
     print(f"  - Using the optimizer: {optimizer}.")
     print(f"  - Using learning rate of: {learning_rate}.")
     print(f"  - Running for {epochs} epochs.")
-    print(f"   -Using class weights: {class_weights})")
-    print(f"  - Using these callbacks: {callbacks}")
+    print(f"  - Using class weights: {class_weights}.")
+    print(f"  - Using these callbacks: {callbacks}.")
     print("******************************************************************")
 
     # Compile the model
@@ -429,27 +441,31 @@ def evaluate_model(data_val, model, history, num_classes=4):
     plt.show()
 
     # Get the class names
-    class_names = list(data_val.class_indices.keys())
+    class_names = list(data_val.class_names)
+    
+    # Create the Confusion Matrix
+    print("Calculating the confusion matrix. This can take a bit.")
+    # Step 1: Get predictions
+    all_predictions = []
+    all_labels = []
 
-    # Make predictions on the test set
-    y_pred = np.argmax(model.predict(data_val), axis=-1)
+    for images, labels in data_val:
+        # Get predictions for this batch
+        predictions = model.predict(images, verbose=0)
 
-    # Get the true labels
-    num_val_samples = data_val.samples  # total number of validation samples
-    batch_size = data_val.batch_size  # batch size
+        # Convert predictions to class indices
+        pred_classes = np.argmax(predictions, axis=1)
 
-    # Calculate the number of batches
-    num_batches = np.ceil(num_val_samples / batch_size)
-    num_batches = int(num_batches)
+        # Append to our lists
+        all_predictions.extend(pred_classes)
+        all_labels.extend(labels.numpy())
 
-    # Get the true labels
-    y_true = np.concatenate(
-        [y for x, y in (next(data_val) for _ in range(num_batches))],
-        axis=0
-    )
+    # Convert lists to numpy arrays
+    all_predictions = np.array(all_predictions)
+    all_labels = np.array(all_labels)
 
-    # Compute the confusion matrix
-    cm = confusion_matrix(y_true.argmax(axis=1), y_pred)
+    # Step 2: Calculate confusion matrix
+    cm = confusion_matrix(all_labels, all_predictions)
 
     # Plot the confusion matrix
     plt.imshow(cm, cmap=plt.cm.Blues)
