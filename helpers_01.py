@@ -315,6 +315,7 @@ def make_model(
     # Define the model
     model = tf.keras.Sequential([
         layers.Input(shape=shape),
+        layers.Rescaling(1./255),
         layers.Conv2D(
             32, (3, 3), padding='same', activation=activation
         ),
