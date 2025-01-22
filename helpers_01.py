@@ -140,10 +140,8 @@ def count_class(counts, batch, classes):
         cc = tf.cast(batch[1] == i, tf.int32)
         counts[i] += tf.reduce_sum(cc)
 
-
-def filter_class(image, label, class_id):
-    return label == class_id
-
+def filter_by_class(x, y, class_index):
+    return tf.equal(y, class_index)
 
 def load_display_data(
     path,
@@ -197,30 +195,66 @@ def load_display_data(
         cls_counts[class_name] = labels.count(class_name)
     print("--------------------------------------------")
     
-    if stratify:  
+    if stratify: 
+        print("Splitting the dataset with stratification, this may take a bit.")
         # Create an image dataset
         dataset = keras.utils.image_dataset_from_directory(
             path,
+            batch_size=batch_size,
+            image_size=image_size,
             labels='inferred',  # Assuming directory structure reflects classes
             label_mode='int',
+           
             shuffle=False  # Do not shuffle to maintain order for splitting
         )
 
-        data_train = []
-        data_val = []
+        images = []
+        labels = []
 
-        for label, count in cls_counts.items():
-            class_images = []
-            for image, labels in dataset:
-                if labels.numpy()[0] == label:
-                    class_images.append(image)
+        # Extract images and labels from the dataset
+        for image_batch, label_batch in dataset:
+            images.extend(image_batch.numpy())
+            labels.extend(label_batch.numpy())
 
-            train_images, val_images = train_test_split(
-                class_images, test_size=0.2, stratify=class_images
+        images = np.array(images)
+        labels = np.array(labels)
+        
+        # One hot encode the labels
+        #labels_one_hot = to_categorical(labels, num_classes=4)
+
+        # Use sklearn's train_test_split
+        X_train, X_val, y_train, y_val = train_test_split(
+            images, labels, test_size=0.2, stratify=labels, random_state=42
+        )
+
+        # Remake train and val datasets
+        data_train = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(batch_size)
+        data_val = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(batch_size)
+
+        # Attach the class_names to the datasets.
+        data_train.class_names = class_names
+        data_val.class_names = class_names
+
+        label_counts = {label: 0 for label in data_train.class_names}
+        for images, labels in data_train:
+            for label in labels.numpy():
+                label_name = data_train.class_names[label]
+                label_counts[label_name] += 1
+
+        for label, count in label_counts.items():
+            print(f"{label}: {count} images")
+
+        # Print the number of number of images per class
+        print("\nFor the stratified split training dataset: ")
+        print("   Class          # of images     # of total")
+        print("--------------------------------------------")
+        for class_name in class_names:
+            print(
+                f"{class_name:>15} {label_counts[class_name]:11}"
+                f"         {label_counts[class_name]/len(X_val)*100:.1f}%"
             )
+        print("--------------------------------------------")
 
-            data_train.extend(train_images) # Add this class's images to the 
-            data_val.extend(val_images)     # train_ and val_ datasets     
         
     else:
         # Split the data randomly
@@ -352,7 +386,7 @@ def compile_train_model(
     callbacks. Returns the compiled model and training history."""
 
     # Deal with class weights
-    num_classes = len(list(data_train.class_names))
+    num_classes = len(data_train.class_names)
     class_indices = range(num_classes)
 
     if not weights:
