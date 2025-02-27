@@ -34,7 +34,15 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.utils import class_weight
 
+class CustomDataset:
+    def __init__(self, dataset, class_names):
+        self.dataset = dataset
+        self.class_names = class_names
 
+    def __getattr__(self, name):
+        return getattr(self.dataset, name)
+
+    
 def download_file(url, filename):
     """Download a file from a URL and save it to the current directory"""
 
@@ -207,55 +215,55 @@ def load_display_data(
            
             shuffle=False  # Do not shuffle to maintain order for splitting
         )
+        
+        # Store the class names
+        class_names = dataset.class_names
+
+        # Convert the dataset to NumPy arrays
+        num_classes = len(class_names)
+        num_samples = tf.data.experimental.cardinality(dataset).numpy()
 
         images = []
         labels = []
 
-        # Extract images and labels from the dataset
         for image_batch, label_batch in dataset:
-            images.extend(image_batch.numpy())
-            labels.extend(label_batch.numpy())
+            images.append(image_batch.numpy())
+            labels.append(label_batch.numpy())
 
-        images = np.array(images)
-        labels = np.array(labels)
-        
-        # One hot encode the labels
-        #labels_one_hot = to_categorical(labels, num_classes=4)
+        images = np.concatenate(images, axis=0)
+        labels = np.concatenate(labels, axis=0)
 
-        # Use sklearn's train_test_split
-        X_train, X_val, y_train, y_val = train_test_split(
+        # Split the dataset into training and validation sets with stratification
+        train_images, val_images, train_labels, val_labels = train_test_split(
             images, labels, test_size=0.2, stratify=labels, random_state=42
         )
 
-        # Remake train and val datasets
-        data_train = tf.data.Dataset.from_tensor_slices((X_train, y_train)).batch(batch_size)
-        data_val = tf.data.Dataset.from_tensor_slices((X_val, y_val)).batch(batch_size)
+        # Convert the split datasets back to tf.data.Dataset objects
+        train_dataset = tf.data.Dataset.from_tensor_slices((train_images, train_labels))
+        val_dataset = tf.data.Dataset.from_tensor_slices((val_images, val_labels))
 
-        # Attach the class_names to the datasets.
-        data_train.class_names = class_names
-        data_val.class_names = class_names
+        # Wrap the datasets with the CustomDataset class
+        data_train = CustomDataset(train_dataset, class_names)
+        data_val = CustomDataset(val_dataset, class_names)
 
-        label_counts = {label: 0 for label in data_train.class_names}
-        for images, labels in data_train:
-            for label in labels.numpy():
-                label_name = data_train.class_names[label]
-                label_counts[label_name] += 1
+        # Apply any additional transformations or preprocessing to the datasets
+        data_train.dataset = data_train.dataset.batch(32).prefetch(tf.data.AUTOTUNE)
+        data_val.dataset = data_val.dataset.batch(32).prefetch(tf.data.AUTOTUNE)
 
-        for label, count in label_counts.items():
-            print(f"{label}: {count} images")
+        # Print the number of images per class in the data_train
+        train_labels_one_hot = tf.one_hot(train_labels, depth=num_classes)
+        train_class_counts = tf.reduce_sum(train_labels_one_hot, axis=0)
 
-        # Print the number of number of images per class
         print("\nFor the stratified split training dataset: ")
         print("   Class          # of images     # of total")
         print("--------------------------------------------")
-        for class_name in class_names:
+ 
+        for class_name, count in zip(data_train.class_names, train_class_counts):
             print(
-                f"{class_name:>15} {label_counts[class_name]:11}"
-                f"         {label_counts[class_name]/len(X_val)*100:.1f}%"
-            )
-        print("--------------------------------------------")
-
-        
+                 f"{class_name:>15} {count.numpy():11.0f}"
+                 f"         {count.numpy()/len(train_labels)*100:.1f}%"
+             )
+            
     else:
         # Split the data randomly
         data_train = tf.keras.preprocessing.image_dataset_from_directory(
