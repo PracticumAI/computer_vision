@@ -7,11 +7,13 @@ import time
 import datetime
 import tarfile
 
-import tensorflow as tf
+import torch
 import keras
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+from torchvision import transforms, datasets
 
 #from keras.preprocessing.image import ImageDataGenerator
 from keras.losses import SparseCategoricalCrossentropy
@@ -34,15 +36,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.utils import class_weight
 
-class CustomDataset:
-    def __init__(self, dataset, class_names):
-        self.dataset = dataset
-        self.class_names = class_names
 
-    def __getattr__(self, name):
-        return getattr(self.dataset, name)
-
-    
 def download_file(url, filename):
     """Download a file from a URL and save it to the current directory"""
 
@@ -266,31 +260,24 @@ def load_display_data(
             
     else:
         # Split the data randomly
-        data_train = tf.keras.preprocessing.image_dataset_from_directory(
-        path,
-        batch_size=batch_size,
-        image_size=image_size,
-        validation_split=0.2,
-        subset='training',
-        seed=123,
-        labels='inferred',
-        label_mode='int'
-        )
+        transform = transforms.Compose([
+            transforms.Resize(image_size),
+            transforms.ToTensor(),
+        ])
 
-        data_val = tf.keras.preprocessing.image_dataset_from_directory(
-            path,
-            batch_size=batch_size,
-            image_size=image_size,
-            validation_split=0.2,
-            subset='validation',
-            seed=123,
-            labels='inferred',
-            label_mode='int'
-        )
+        dataset = datasets.ImageFolder(root=path, transform=transform)
+
+        train_size = int(0.8 * len(dataset))
+        val_size = len(dataset) - train_size
+        data_train, data_val = torch.utils.data.random_split(dataset, [train_size, val_size])
+
+        data_train = torch.utils.data.DataLoader(data_train, batch_size=batch_size, shuffle=True)
+        data_val = torch.utils.data.DataLoader(data_val, batch_size=batch_size, shuffle=False)
+
 
     if show_pictures:
         # Get the class names
-        class_names = list(data_train.class_names)
+        class_names = list(dataset.classes)
         print(f'The classes in your dataset are: {class_names}')
 
         # Display up to 3 images from each of the categories
@@ -330,9 +317,9 @@ def load_optimizer(optimizer_name):
     """Takes an optimizer name as a string and checks if it's valid"""
 
     # Check if the optimizer name is valid
-    if optimizer_name in tf.keras.optimizers.__dict__:
+    if optimizer_name in keras.optimizers.__dict__:
         # Return the corresponding optimizer function
-        return tf.keras.optimizers.__dict__[optimizer_name]
+        return keras.optimizers.__dict__[optimizer_name]
 
     # Raise an exception if the optimizer name is invalid
     raise ValueError(f"Invalid optimizer name: {optimizer_name}")
@@ -355,7 +342,7 @@ def make_model(
     print("*****************************************************************")
 
     # Define the model
-    model = tf.keras.Sequential([
+    model = keras.Sequential([
         layers.Input(shape=shape),
         layers.Rescaling(1./255),
         layers.Conv2D(
@@ -439,7 +426,7 @@ def compile_train_model(
     # Set name for the log directory
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     log_dir = f"logs/fit_{log_name}_{epochs}_{time}"
-    callbacks = tf.keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
+    callbacks = keras.callbacks.TensorBoard(log_dir=log_dir, histogram_freq=1)
 
     # Train the model
     history = model.fit(
