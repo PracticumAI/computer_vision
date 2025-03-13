@@ -13,6 +13,8 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+from PIL import Image
+
 from torchvision import transforms, datasets
 
 #from keras.preprocessing.image import ImageDataGenerator
@@ -148,7 +150,7 @@ def filter_by_class(x, y, class_index):
 def load_display_data(
     path,
     batch_size=32,
-    shape=(80, 80, 3),
+    shape=(3, 80, 80),
     show_pictures=True,
     stratify=False,
     return_cls_counts=False,
@@ -281,29 +283,21 @@ def load_display_data(
         print(f'The classes in your dataset are: {class_names}')
 
         # Display up to 3 images from each of the categories
-        for i, class_name in enumerate(class_names):
+        for class_name in class_names:
             plt.figure(figsize=(10, 10))
 
-            # Get one batch to use for display
-            for images, labels in data_train.take(1):
-                break
+            # Get 3 random images for this class
+            class_images = [img for img, label in zip(images, labels) if label == class_name]
+            num_images = min(3, len(class_images))
+            class_images = np.random.choice(class_images, num_images, replace=False)
 
-            # Find indices of the desired class in this batch
-            mask = labels == i
-            # Select images of the desired class
-            class_images = tf.boolean_mask(images, mask)
-            # Convert TensorFlow tensors to NumPy arrays
-            class_images = np.array(class_images)
-
-            # Number of images to show.
-            # We don't want to show more than 3 images.
-            num_images = min(len(class_images), 3)
-
-            for j in range(num_images):
-                ax = plt.subplot(1, num_images, j + 1)
-                plt.imshow(class_images[j].astype("uint8"))
-                plt.title(class_name)
+            # Display the images
+            for i, image_path in enumerate(class_images):
+                image = Image.open(image_path)
+                plt.subplot(1, num_images, i + 1)
+                plt.imshow(image)
                 plt.axis("off")
+                plt.title(class_name)
             plt.show()
 
     if return_cls_counts:
@@ -327,9 +321,9 @@ def load_optimizer(optimizer_name):
 
 def make_model(
         activation='relu',
-        shape=(80, 80, 3),
+        shape=(3, 80, 80),
         num_classes=4,
-        drouput_rate=0.2
+        dropout_rate=0.2
         ):
     '''Sets up a model. 
           Takes in an activation function, shape for the input images, 
@@ -338,28 +332,38 @@ def make_model(
     print("Make model:")
     print(f"  - Using the activation function: {activation}.")
     print(f"  - Model will have {num_classes} classes.")
-    print(f"  - Using a dropout rate of: {drouput_rate}.")
+    print(f"  - Using a dropout rate of: {dropout_rate}.")
     print("*****************************************************************")
 
     # Define the model
     model = keras.Sequential([
+        # Input layer
         layers.Input(shape=shape),
+    
+        # Rescaling layer to normalize pixel values
         layers.Rescaling(1./255),
-        layers.Conv2D(
-            32, (3, 3), padding='same', activation=activation
-        ),
+        
+        # First Convolutional Block
+        layers.Conv2D(32, (3, 3), activation=activation, padding='same'),
         layers.MaxPooling2D((2, 2)),
-        layers.Conv2D(64, (3, 3), padding='same', activation=activation),
-        layers.MaxPooling2D((2, 2)),
-        layers.Dropout(drouput_rate),
-        layers.Conv2D(128, (3, 3), padding='same', activation=activation),
-        layers.MaxPooling2D((2, 2), padding='same'),
-        layers.Dropout(drouput_rate),
+        
+        # Second Convolutional Block
+        layers.Conv2D(64, (3, 3), activation=activation, padding='same'),
+        
+        # Third Convolutional Block
+        layers.Conv2D(128, (3, 3), activation=activation, padding='same'),
+        
+        # Flatten and apply dropout
         layers.Flatten(),
+        layers.Dropout(dropout_rate),
+        
+        # Dense hidden layer
         layers.Dense(128, activation=activation),
+        
+        # Output layer with softmax activation for 4 classes
         layers.Dense(num_classes, activation='softmax')
     ])
-
+    
     return model
 
 
@@ -380,8 +384,9 @@ def compile_train_model(
     learning rate, epochs, if class weights should be used, and a list of
     callbacks. Returns the compiled model and training history."""
 
-    # Deal with class weights
-    num_classes = len(data_train.class_names)
+    # Get the list of classes from the DataLoader
+    class_names = data_train.dataset.dataset.classes
+    num_classes = len(class_names)
     class_indices = range(num_classes)
 
     if not weights:
@@ -391,12 +396,11 @@ def compile_train_model(
 
     else:
         # Calculate class weights to deal with imbalance
-        class_names = list(data_train.class_indices.keys())
         print(class_names)
         # Make a y from cls_counts
         y_vals = []
-        for cls in list(data_train.class_indices.keys()):
-            y_vals += [data_train.class_indices[cls]] * int(weights[cls])
+        for cls in class_names:
+            y_vals += [data_train.dataset.dataset.class_to_idx[cls]] * int(weights[cls])
 
         cls_wt = class_weight.compute_class_weight(
             'balanced', 
@@ -421,7 +425,8 @@ def compile_train_model(
 
     # Compile the model
     opt = load_optimizer(optimizer)(learning_rate=learning_rate)
-    model.compile(optimizer=opt, loss=loss, metrics=["accuracy"])
+    model.compile(optimizer=opt, loss=loss,
+                   metrics=["accuracy"])
 
     # Set name for the log directory
     time = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
