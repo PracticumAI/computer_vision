@@ -1,22 +1,20 @@
 import requests
 import os
 import time
-import datetime
 import tarfile
 
 import torch
 import torch.nn as nn
-import torch.optim as optim
+
 from torchvision import transforms
-from torch.utils.data import DataLoader
-import numpy as np
-import pandas as pd
+from torch.utils.data import DataLoader, Dataset, random_split
+
 import matplotlib.pyplot as plt
 
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
-from sklearn.utils import class_weight
 
+from pathlib import Path
 
 class ImageDataset(Dataset):
     def __init__(self, file_list, label_list, transform=None):
@@ -83,16 +81,16 @@ def manage_data(
 
     # Check common paths of where the data might be on different systems
     likely_paths = [
-        os.path.normpath(f"/blue/practicum-ai/share/data/{folder_name}"),
-        os.path.normpath(f"/project/scinet_workshop2/data/{folder_name}"),
-        os.path.join("data", folder_name),
-        os.path.normpath(folder_name),
+        Path(f"/blue/practicum-ai/share/data/{folder_name}"),
+        Path(f"/project/scinet_workshop2/data/{folder_name}"),
+        Path("data") / folder_name,
+        Path(folder_name),
     ]
 
     for path in likely_paths:
-        if os.path.exists(path):
+        if path.exists():
             print(f"Found data at {path}.")
-            return path
+            return str(path)
 
     prompt = (
         "Could not find data in the common locations. "
@@ -102,10 +100,10 @@ def manage_data(
 
     if answer.lower() == "yes":
         user_input = input("Please enter the path to the data folder: ")
-        path = os.path.join(os.path.normpath(user_input), folder_name)
-        if os.path.exists(path):
+        path = Path(user_input) / folder_name
+        if path.exists():
             print(f"Thanks! Found your data at {path}.")
-            return path
+            return str(path)
 
         print("Sorry, that path does not exist.")
 
@@ -116,11 +114,12 @@ def manage_data(
         download_file(url, filename)
         print("Data downloaded, unpacking")
         extract_file(filename, dest)
+        final_path = Path(dest) / folder_name
         print(
             "Data downloaded and unpacked. Now available at "
-            f"{os.path.join(dest, folder_name)}."
+            f"{final_path}."
         )
-        return os.path.normpath(os.path.join(dest, folder_name))
+        return str(final_path)
 
     print(
         "Sorry, I cannot find the data."
