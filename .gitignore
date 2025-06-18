@@ -1,6 +1,7 @@
 # Tensorboard log and YOLO runs folders
 logs/
 runs/
+lightning_logs/
 
 # data folder and fruits_detection file
 data/

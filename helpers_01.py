@@ -1,10 +1,14 @@
 import requests
-import os
 import time
 import tarfile
 
 import torch
 import torch.nn as nn
+import torch.optim as optim
+import pytorch_lightning as pl
+from pytorch_lightning import Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
+from pytorch_lightning.loggers import TensorBoardLogger
 
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -12,6 +16,7 @@ from torchvision.datasets import ImageFolder
 from PIL import Image
 
 import matplotlib.pyplot as plt
+import numpy as np
 
 from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
@@ -153,196 +158,207 @@ def load_display_data(
     print(f"  - Returning class counts for later use? {return_cls_counts}")
     print("******************************************************************")
 
-    # Define the image size using the 1st 2 elements of the shape parameter
-    # We don't need the number of channels here, just the dimensions to use
-    image_size = shape[:2]
-
-    # Get the class names
+    # Get the class names and count images
     path_obj = Path(path)
     class_names = [item.name for item in path_obj.iterdir() if item.is_dir()]
-
-    images = []  # Initialize the images list
-    labels = []  # Initialize the labels list
+    
+    images = []
+    labels = []
     cls_counts = {}
 
-    # Get the images and labels to use for training and validation
     for class_name in class_names:
         class_path = path_obj / class_name
-        for image_file in class_path.iterdir():
-            if image_file.is_file():
-                images.append(str(image_file))
-                labels.append(class_name)
+        class_images = [str(img) for img in class_path.iterdir() if img.is_file()]
+        images.extend(class_images)
+        labels.extend([class_name] * len(class_images))
+        cls_counts[class_name] = len(class_images)
 
-    # Print the number of number of images per class
+    # Print class distribution
     print("\nFor the full dataset: ")
     print("   Class          # of images     # of total")
     print("--------------------------------------------")
     for class_name in class_names:
-        print(
-            f"{class_name:>15} {labels.count(class_name):11}"
-            f"         {labels.count(class_name)/len(labels)*100:.1f}%"
-        )
-        # Save class count to return if requested
-        cls_counts[class_name] = labels.count(class_name)
+        count = cls_counts[class_name]
+        percentage = count / len(labels) * 100
+        print(f"{class_name:>15} {count:11}         {percentage:.1f}%")
     print("--------------------------------------------")
     
     # Define transformations
     transform = transforms.Compose([
-        transforms.Resize(shape),
+        transforms.Resize(shape[:2]),
         transforms.ToTensor(),
         transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
     ])
 
-    if stratify: 
-        print("Splitting the dataset with stratification, this may take a bit.")
-
-        # Split the data using stratification
-        image_train, image_val, labels_train, labels_val  = train_test_split(
-            images, labels, test_size=0.2, stratify=labels, random_state=123
-        )
-
-        # Load the dataset using ImageFolder
-        dataset = ImageFolder(path, transform=transform)
-
-        # Create the dataloader
-        data_train = DataLoader(image_train, labels_train, transform=transform)
-        data_val = DataLoader(image_val, labels_val, transform=transform)
-
-        # Get the class counts for the training data
-        train_class_counts = []
-        for class_name in class_names:
-            train_class_counts.append(data_train.count(class_name))
-
-        # Print the number of number of images per class
-        print("\nFor the stratified split training dataset: ")
-        print("   Class          # of images     # of total")
-        print("--------------------------------------------")
- 
-        for class_name, count in zip(data_train.class_names, train_class_counts):
-            print(
-                 f"{class_name:>15} {count.numpy():11.0f}"
-                 f"         {count.numpy()/len(train_labels)*100:.1f}%"
-             )
-            
-    else:
-        # Split the data randomly
-        # Load the dataset using ImageFolder
-        dataset = ImageFolder(path, transform=transform)
-
-        # Calculate the sizes of training and validation sets
-        train_size = int(0.8 * len(dataset))
-        val_size = len(dataset) - train_size
-
-        # Split the dataset into training and validation sets
-        train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-
-        # Create data loaders for training and validation sets
-        data_train = DataLoader(train_dataset, batch_size=32, shuffle=True)
-        data_val = DataLoader(val_dataset, batch_size=32, shuffle=False)
-        
+    # Load dataset and create data loaders
+    dataset = ImageFolder(path, transform=transform)
+    
+    # Use random split (stratification would require more complex implementation)
+    train_size = int(0.8 * len(dataset))
+    val_size = len(dataset) - train_size
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
+    
+    data_train = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+    data_val = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     if show_pictures:
-        # Get the class names
-        class_names = list(data_train.class_names)
-        print(f'The classes in your dataset are: {class_names}')
+        print(f'The classes in your dataset are: {dataset.classes}')
 
-        # Display up to 3 images from each of the categories
-        for i, class_name in enumerate(class_names):
-            plt.figure(figsize=(10, 10))
+        # Display up to 3 images from each class
+        for class_name in class_names:
+            plt.figure(figsize=(10, 3))
+            class_images = [img for img, label in zip(images, labels) if label == class_name]
+            num_images = min(3, len(class_images))
+            selected_images = np.random.choice(class_images, num_images, replace=False)
 
-            # Get one batch to use for display
-            for images, labels in data_train.take(1):
-                break
-
-            # Find indices of the desired class in this batch
-            mask = labels == i
-            # Select images of the desired class
-            class_images = images[mask]
-
-            # Number of images to show.
-            # We don't want to show more than 3 images.
-            num_images = min(len(class_images), 3)
-
-            for j in range(num_images):
-                ax = plt.subplot(1, num_images, j + 1)
-                plt.imshow(class_images[j].astype("uint8"))
-                plt.title(class_name)
+            for i, image_path in enumerate(selected_images):
+                image = Image.open(image_path)
+                plt.subplot(1, num_images, i + 1)
+                plt.imshow(image)
                 plt.axis("off")
+                plt.title(class_name)
             plt.show()
 
     if return_cls_counts:
         print(f"\nClass counts being returned: {cls_counts}.")
         return data_train, data_val, cls_counts
 
-    return data_train, data_val, labels_train, labels_val 
+    return data_train, data_val
 
+class SimpleCNN(pl.LightningModule):
+    """Simple CNN model using PyTorch Lightning"""
+    
+    def __init__(self, input_shape=(3, 80, 80), num_classes=4, learning_rate=0.001):
+        super(SimpleCNN, self).__init__()
+        self.save_hyperparameters()
+        
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
+        self.fc1 = nn.Linear(64 * 20 * 20, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
+        self.dropout = nn.Dropout(0.5)
+        self.relu = nn.ReLU()
+        
+        self.loss_fn = nn.CrossEntropyLoss()
+        
+    def forward(self, x):
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        x = x.view(-1, 64 * 20 * 20)
+        x = self.relu(self.fc1(x))
+        x = self.dropout(x)
+        x = self.fc2(x)
+        return x
+    
+    def training_step(self, batch, batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = self.loss_fn(outputs, labels)
+        
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        accuracy = (predicted == labels).float().mean()
+        
+        # Log metrics
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_accuracy', accuracy, on_step=True, on_epoch=True, prog_bar=True)
+        
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = self.loss_fn(outputs, labels)
+        
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        accuracy = (predicted == labels).float().mean()
+        
+        # Log metrics
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        self.log('val_accuracy', accuracy, on_epoch=True, prog_bar=True)
+        
+        return {'val_loss': loss, 'val_accuracy': accuracy, 'predictions': predicted, 'labels': labels}
+    
+    def test_step(self, batch, batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = self.loss_fn(outputs, labels)
+        
+        # Calculate accuracy
+        _, predicted = torch.max(outputs.data, 1)
+        accuracy = (predicted == labels).float().mean()
+        
+        # Log metrics
+        self.log('test_loss', loss, on_epoch=True)
+        self.log('test_accuracy', accuracy, on_epoch=True)
+        
+        return {'test_loss': loss, 'test_accuracy': accuracy, 'predictions': predicted, 'labels': labels}
+    
+    def configure_optimizers(self):
+        optimizer = optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        return optimizer
 
-def make_model(input_shape=(3, 80, 80), num_classes=4):
-    """Create a simple CNN model using PyTorch"""
-    class SimpleCNN(nn.Module):
-        def __init__(self):
-            super(SimpleCNN, self).__init__()
-            self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
-            self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-            self.fc1 = nn.Linear(64 * 20 * 20, 128)
-            self.fc2 = nn.Linear(128, num_classes)
-            self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-            self.dropout = nn.Dropout(0.5)
-            self.relu = nn.ReLU()
+def make_model(input_shape=(3, 80, 80), num_classes=4, learning_rate=0.001):
+    """Create a simple CNN model using PyTorch Lightning"""
+    return SimpleCNN(input_shape=input_shape, num_classes=num_classes, learning_rate=learning_rate)
 
-        def forward(self, x):
-            x = self.pool(self.relu(self.conv1(x)))
-            x = self.pool(self.relu(self.conv2(x)))
-            x = x.view(-1, 64 * 20 * 20)
-            x = self.relu(self.fc1(x))
-            x = self.dropout(x)
-            x = self.fc2(x)
-            return x
+def compile_train_model(train_loader, val_loader, model=None, num_epochs=10, learning_rate=0.001, 
+                       num_classes=4, accelerator='auto'):
+    """Train the model using PyTorch Lightning"""
+    
+    if model is None:
+        model = make_model(num_classes=num_classes, learning_rate=learning_rate)
+    
+    # Setup callbacks
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_loss',
+        dirpath='checkpoints/',
+        filename='best-checkpoint',
+        save_top_k=1,
+        mode='min'
+    )
+    
+    early_stop_callback = EarlyStopping(
+        monitor='val_loss',
+        min_delta=0.00,
+        patience=5,
+        verbose=False,
+        mode='min'
+    )
+    
+    # Setup logger
+    logger = TensorBoardLogger('lightning_logs/', name='bee_wasp_model')
+    
+    # Create trainer
+    trainer = Trainer(
+        max_epochs=num_epochs,
+        callbacks=[checkpoint_callback, early_stop_callback],
+        logger=logger,
+        accelerator=accelerator,
+        log_every_n_steps=10
+    )
+    
+    # Train the model
+    trainer.fit(model, train_loader, val_loader)
+    
+    return model, trainer
 
-    return SimpleCNN()
-
-def compile_train_model(train_loader, val_loader, model, loss_fn, optimizer, num_epochs=10, device='cuda'):
-    """Compile and train the model"""
-    model.to(device)
-    for epoch in range(num_epochs):
-        model.train()
-        running_loss = 0.0
-        for inputs, labels in train_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = loss_fn(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item()
-
-        print(f"Epoch {epoch+1}/{num_epochs}, Loss: {running_loss/len(train_loader)}")
-
-        model.eval()
-        val_loss = 0.0
-        with torch.no_grad():
-            for inputs, labels in val_loader:
-                inputs, labels = inputs.to(device), labels.to(device)
-                outputs = model(inputs)
-                loss = loss_fn(outputs, labels)
-                val_loss += loss.item()
-
-        print(f"Validation Loss: {val_loss/len(val_loader)}")
-
-    return model
-
-def evaluate_model(test_loader, model, device='cuda'):
-    """Evaluate the model"""
-    model.to(device)
-    model.eval()
-    correct = 0
-    total = 0
-    with torch.no_grad():
-        for inputs, labels in test_loader:
-            inputs, labels = inputs.to(device), labels.to(device)
-            outputs = model(inputs)
-            _, predicted = torch.max(outputs.data, 1)
-            total += labels.size(0)
-            correct += (predicted == labels).sum().item()
-
-    print(f"Accuracy: {100 * correct / total}%")
+def evaluate_model(test_loader, model, trainer=None):
+    """Evaluate the model using PyTorch Lightning"""
+    
+    if trainer is None:
+        trainer = Trainer(accelerator='auto')
+    
+    # Test the model
+    results = trainer.test(model, test_loader)
+    
+    # Print results
+    if results:
+        test_accuracy = results[0]['test_accuracy']
+        test_loss = results[0]['test_loss']
+        print(f"Test Accuracy: {test_accuracy:.4f}")
+        print(f"Test Loss: {test_loss:.4f}")
+    
+    return results
