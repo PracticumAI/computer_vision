@@ -8,6 +8,8 @@ import torch.nn as nn
 
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, random_split
+from torchvision.datasets import ImageFolder
+from PIL import Image
 
 import matplotlib.pyplot as plt
 
@@ -47,7 +49,7 @@ def download_file(url, filename):
         for chunk in response.iter_content(chunk_size=8192):
             f.write(chunk)
 
-    while not os.path.exists(filename):
+    while not Path(filename).exists():
         time.sleep(1)
 
     print(f"Downloaded {filename} successfully.")
@@ -156,7 +158,8 @@ def load_display_data(
     image_size = shape[:2]
 
     # Get the class names
-    class_names = os.listdir(path)
+    path_obj = Path(path)
+    class_names = [item.name for item in path_obj.iterdir() if item.is_dir()]
 
     images = []  # Initialize the images list
     labels = []  # Initialize the labels list
@@ -164,11 +167,11 @@ def load_display_data(
 
     # Get the images and labels to use for training and validation
     for class_name in class_names:
-        class_path = os.path.join(path, class_name)
-        for image_name in os.listdir(class_path):
-            image_path = os.path.join(class_path, image_name)
-            images.append(image_path)
-            labels.append(class_name)
+        class_path = path_obj / class_name
+        for image_file in class_path.iterdir():
+            if image_file.is_file():
+                images.append(str(image_file))
+                labels.append(class_name)
 
     # Print the number of number of images per class
     print("\nFor the full dataset: ")
