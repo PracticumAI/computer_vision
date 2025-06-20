@@ -534,8 +534,7 @@ def test_model(data_module, model, trainer=None):
                             print(f"Processing tag: {tag}")  # Debug print
                             
                             # Training loss - look for epoch-level metrics only (exclude step-level)
-                            if ('train' in tag_lower and 'loss' in tag_lower and 
-                                'epoch' in tag_lower and 'step' not in tag_lower):
+                            if ('train' in tag_lower and 'loss' in tag_lower and 'step' not in tag_lower):
                                 events = event_acc.Scalars(tag)
                                 train_losses = [(e.step, e.value) for e in events]
                                 print(f"Found train loss: {tag} with {len(train_losses)} points")
@@ -547,8 +546,7 @@ def test_model(data_module, model, trainer=None):
                                 print(f"Found val loss: {tag} with {len(val_losses)} points")
                                 
                             # Training accuracy - look for epoch-level metrics only (exclude step-level)
-                            elif ('train' in tag_lower and 'acc' in tag_lower and 
-                                  'epoch' in tag_lower and 'step' not in tag_lower):
+                            elif ('train' in tag_lower and 'acc' in tag_lower and 'step' not in tag_lower):
                                 events = event_acc.Scalars(tag)
                                 train_accs = [(e.step, e.value) for e in events]
                                 print(f"Found train acc: {tag} with {len(train_accs)} points")
