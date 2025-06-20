@@ -18,6 +18,13 @@ except ImportError:
     # Fallback for older versions
     from pytorch_lightning.metrics import Accuracy
 
+# For transfer learning with pre-trained models
+try:
+    import timm
+except ImportError:
+    print("Warning: timm not available. Transfer learning features will not work.")
+    timm = None
+
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, random_split
 from torchvision.datasets import ImageFolder
@@ -30,6 +37,7 @@ from sklearn.metrics import confusion_matrix
 from sklearn.model_selection import train_test_split
 
 from pathlib import Path
+import timm
 
 class ImageDataset(Dataset):
     def __init__(self, file_list, label_list, transform=None):
@@ -705,7 +713,7 @@ class BeeWaspAugmentedDataModule(pl.LightningDataModule):
             ])
         elif augmentation_strength == 'light':
             self.train_transform = transforms.Compose([
-                transforms.Resize(shape[:2]),
+                transforms.Resize((shape[0], shape[1])),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomRotation(degrees=10),
                 transforms.ToTensor(),
@@ -713,21 +721,21 @@ class BeeWaspAugmentedDataModule(pl.LightningDataModule):
             ])
         elif augmentation_strength == 'medium':
             self.train_transform = transforms.Compose([
-                transforms.Resize(shape[:2]),
+                transforms.Resize((shape[0], shape[1])),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomRotation(degrees=15),
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
-                transforms.RandomResizedCrop(size=shape[:2], scale=(0.8, 1.0)),
+                transforms.RandomResizedCrop(size=(shape[0], shape[1]), scale=(0.8, 1.0)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ])
         elif augmentation_strength == 'heavy':
             self.train_transform = transforms.Compose([
-                transforms.Resize(shape[:2]),
+                transforms.Resize((shape[0], shape[1])),
                 transforms.RandomHorizontalFlip(p=0.5),
                 transforms.RandomRotation(degrees=20),
                 transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
-                transforms.RandomResizedCrop(size=shape[:2], scale=(0.7, 1.0)),
+                transforms.RandomResizedCrop(size=(shape[0], shape[1]), scale=(0.7, 1.0)),
                 transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
                 transforms.ToTensor(),
                 transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
@@ -735,7 +743,7 @@ class BeeWaspAugmentedDataModule(pl.LightningDataModule):
         
         # Validation transform (no augmentation)
         self.val_transform = transforms.Compose([
-            transforms.Resize(shape[:2]),
+            transforms.Resize((shape[0], shape[1])),
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ])
@@ -894,4 +902,199 @@ def load_display_data_augmented(
         return data_module, cls_counts
 
     return data_module
+
+class TransferLearningCNN(pl.LightningModule):
+    """Transfer Learning model using pre-trained networks with PyTorch Lightning"""
+    
+    def __init__(self, num_classes=4, learning_rate=0.0001, model_name='efficientnet_b5', 
+                 freeze_backbone=False, dropout_rate=0.3):
+        super().__init__()
+        self.save_hyperparameters()
+        
+        # Load pre-trained model
+        self.backbone = timm.create_model(
+            model_name, 
+            pretrained=True, 
+            num_classes=0,  # Remove the classifier head
+            global_pool=''  # Remove global pooling
+        )
+        
+        # Freeze backbone if requested
+        if freeze_backbone:
+            for param in self.backbone.parameters():
+                param.requires_grad = False
+            print(f"Backbone ({model_name}) frozen for feature extraction")
+        else:
+            print(f"Backbone ({model_name}) unfrozen for fine-tuning")
+        
+        # Get feature dimension from backbone
+        with torch.no_grad():
+            # Create a dummy input to get feature dimensions
+            dummy_input = torch.randn(1, 3, 224, 224)
+            dummy_features = self.backbone(dummy_input)
+            if len(dummy_features.shape) == 4:  # If output is 4D (batch, channels, height, width)
+                feature_dim = dummy_features.shape[1]
+                self.global_pool = nn.AdaptiveAvgPool2d(1)
+                self.flatten = nn.Flatten()
+            else:  # If output is already 2D (batch, features)
+                feature_dim = dummy_features.shape[1]
+                self.global_pool = nn.Identity()
+                self.flatten = nn.Identity()
+        
+        # Custom classifier head
+        self.classifier = nn.Sequential(
+            nn.Dropout(dropout_rate),
+            nn.Linear(feature_dim, 512),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(512, num_classes)
+        )
+        
+        # Metrics for tracking - updated API
+        self.train_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.val_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.test_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        
+        print(f"Model created with {sum(p.numel() for p in self.parameters()):,} total parameters")
+        print(f"Trainable parameters: {sum(p.numel() for p in self.parameters() if p.requires_grad):,}")
+        
+    def forward(self, x):
+        # Extract features using the backbone
+        features = self.backbone(x)
+        
+        # Apply global pooling if needed
+        features = self.global_pool(features)
+        features = self.flatten(features)
+        
+        # Apply classifier
+        logits = self.classifier(features)
+        return logits
+    
+    def training_step(self, batch, _batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = F.cross_entropy(outputs, labels)
+        
+        # Update and log metrics
+        self.train_accuracy(outputs, labels)
+        self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_acc', self.train_accuracy, on_step=False, on_epoch=True, prog_bar=True)
+        
+        return loss
+    
+    def validation_step(self, batch, _batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = F.cross_entropy(outputs, labels)
+        
+        # Update and log metrics
+        self.val_accuracy(outputs, labels)
+        self.log('val_loss', loss, on_epoch=True, prog_bar=True)
+        self.log('val_acc', self.val_accuracy, on_epoch=True, prog_bar=True)
+        
+        return loss
+    
+    def test_step(self, batch, _batch_idx):
+        inputs, labels = batch
+        outputs = self(inputs)
+        loss = F.cross_entropy(outputs, labels)
+        
+        # Update and log metrics
+        self.test_accuracy(outputs, labels)
+        self.log('test_loss', loss, on_epoch=True)
+        self.log('test_acc', self.test_accuracy, on_epoch=True)
+        
+        return loss
+    
+    def configure_optimizers(self):
+        # Use different learning rates for backbone and classifier if fine-tuning
+        if self.hparams.freeze_backbone:
+            # Only optimize classifier parameters
+            optimizer = optim.Adam(
+                self.classifier.parameters(), 
+                lr=self.hparams.learning_rate
+            )
+        else:
+            # Use different learning rates for backbone and classifier
+            backbone_lr = self.hparams.learning_rate * 0.1  # Lower LR for pre-trained layers
+            classifier_lr = self.hparams.learning_rate
+            
+            optimizer = optim.Adam([
+                {'params': self.backbone.parameters(), 'lr': backbone_lr},
+                {'params': self.classifier.parameters(), 'lr': classifier_lr}
+            ])
+        
+        # Learning rate scheduler
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss"
+            }
+        }
+
+def train_transfer_model(data_module, num_classes=4, learning_rate=0.0001, max_epochs=10, 
+                        accelerator='auto', devices='auto', model_name='efficientnet_b5',
+                        freeze_backbone=False, dropout_rate=0.3):
+    """Train a transfer learning model using PyTorch Lightning
+    
+    Args:
+        data_module: Lightning DataModule for the dataset
+        num_classes: Number of classes for classification
+        learning_rate: Learning rate for optimizer
+        max_epochs: Maximum number of training epochs
+        accelerator: Device type ('auto', 'gpu', 'cpu')
+        devices: Number/type of devices to use
+        model_name: Name of the pre-trained model to use
+        freeze_backbone: Whether to freeze the backbone for feature extraction
+        dropout_rate: Dropout probability (0.0 to 1.0)
+    
+    Returns:
+        tuple: (trained_model, trainer)
+    """
+    
+    # Create transfer learning model
+    model = TransferLearningCNN(
+        num_classes=num_classes,
+        learning_rate=learning_rate,
+        model_name=model_name,
+        freeze_backbone=freeze_backbone,
+        dropout_rate=dropout_rate
+    )
+    
+    # Create logger for TensorBoard
+    logger = TensorBoardLogger("lightning_logs", name=f"transfer_{model_name}")
+    
+    # Create callbacks for early stopping and model checkpointing
+    early_stopping = EarlyStopping(
+        monitor='val_loss',
+        patience=5,  # More patience for transfer learning
+        verbose=False,
+        mode='min'
+    )
+    
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_acc',
+        dirpath='checkpoints/',
+        filename=f'best-{model_name}-checkpoint',
+        save_top_k=1,
+        mode='max'
+    )
+    
+    # Create trainer
+    trainer = pl.Trainer(
+        max_epochs=max_epochs,
+        accelerator=accelerator,
+        devices=devices,
+        logger=logger,
+        callbacks=[early_stopping, checkpoint_callback],
+        enable_progress_bar=True,
+        enable_model_summary=True
+    )
+    
+    # Train the model
+    trainer.fit(model, datamodule=data_module)
+    
+    return model, trainer
 
