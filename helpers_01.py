@@ -4,11 +4,19 @@ import tarfile
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import pytorch_lightning as pl
 from pytorch_lightning import Trainer
 from pytorch_lightning.callbacks import ModelCheckpoint, EarlyStopping
 from pytorch_lightning.loggers import TensorBoardLogger
+
+# Import torchmetrics separately - it's now a separate package
+try:
+    from torchmetrics import Accuracy
+except ImportError:
+    # Fallback for older versions
+    from pytorch_lightning.metrics import Accuracy
 
 from torchvision import transforms
 from torch.utils.data import DataLoader, Dataset, random_split
@@ -316,137 +324,172 @@ def load_display_data(
 class SimpleCNN(pl.LightningModule):
     """Simple CNN model using PyTorch Lightning"""
     
-    def __init__(self, input_shape=(3, 80, 80), num_classes=4, learning_rate=0.001):
-        super(SimpleCNN, self).__init__()
+    def __init__(self, num_classes=4, learning_rate=0.001, input_shape=(3, 80, 80)):
+        super().__init__()
         self.save_hyperparameters()
         
+        # Model architecture
         self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.fc1 = nn.Linear(64 * 20 * 20, 128)
-        self.fc2 = nn.Linear(128, num_classes)
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
         self.dropout = nn.Dropout(0.5)
         self.relu = nn.ReLU()
         
-        self.loss_fn = nn.CrossEntropyLoss()
+        # Dynamically calculate the correct input size for the first linear layer
+        with torch.no_grad():
+            dummy_input = torch.zeros(1, *input_shape)
+            dummy_output = self._get_conv_output(dummy_input)
+            self.conv_output_size = dummy_output.numel()
+        
+        self.fc1 = nn.Linear(self.conv_output_size, 128)
+        self.fc2 = nn.Linear(128, num_classes)
+        
+        # Metrics for tracking - updated API
+        self.train_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.val_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+        self.test_accuracy = Accuracy(task='multiclass', num_classes=num_classes)
+    
+    def _get_conv_output(self, x):
+        """Helper method to calculate the output size after conv layers"""
+        x = self.pool(self.relu(self.conv1(x)))
+        x = self.pool(self.relu(self.conv2(x)))
+        return torch.flatten(x, 1)
         
     def forward(self, x):
         x = self.pool(self.relu(self.conv1(x)))
         x = self.pool(self.relu(self.conv2(x)))
-        x = x.view(-1, 64 * 20 * 20)
+        x = torch.flatten(x, 1)
         x = self.relu(self.fc1(x))
         x = self.dropout(x)
         x = self.fc2(x)
         return x
     
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, _batch_idx):
         inputs, labels = batch
         outputs = self(inputs)
-        loss = self.loss_fn(outputs, labels)
+        loss = F.cross_entropy(outputs, labels)
         
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        accuracy = (predicted == labels).float().mean()
-        
-        # Log metrics
+        # Update and log metrics
+        self.train_accuracy(outputs, labels)
         self.log('train_loss', loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log('train_accuracy', accuracy, on_step=True, on_epoch=True, prog_bar=True)
+        self.log('train_acc', self.train_accuracy, on_step=False, on_epoch=True, prog_bar=True)
         
         return loss
     
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, _batch_idx):
         inputs, labels = batch
         outputs = self(inputs)
-        loss = self.loss_fn(outputs, labels)
+        loss = F.cross_entropy(outputs, labels)
         
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        accuracy = (predicted == labels).float().mean()
-        
-        # Log metrics
+        # Update and log metrics
+        self.val_accuracy(outputs, labels)
         self.log('val_loss', loss, on_epoch=True, prog_bar=True)
-        self.log('val_accuracy', accuracy, on_epoch=True, prog_bar=True)
+        self.log('val_acc', self.val_accuracy, on_epoch=True, prog_bar=True)
         
-        return {'val_loss': loss, 'val_accuracy': accuracy, 'predictions': predicted, 'labels': labels}
+        return loss
     
-    def test_step(self, batch, batch_idx):
+    def test_step(self, batch, _batch_idx):
         inputs, labels = batch
         outputs = self(inputs)
-        loss = self.loss_fn(outputs, labels)
+        loss = F.cross_entropy(outputs, labels)
         
-        # Calculate accuracy
-        _, predicted = torch.max(outputs.data, 1)
-        accuracy = (predicted == labels).float().mean()
-        
-        # Log metrics
+        # Update and log metrics
+        self.test_accuracy(outputs, labels)
         self.log('test_loss', loss, on_epoch=True)
-        self.log('test_accuracy', accuracy, on_epoch=True)
+        self.log('test_acc', self.test_accuracy, on_epoch=True)
         
-        return {'test_loss': loss, 'test_accuracy': accuracy, 'predictions': predicted, 'labels': labels}
+        return loss
     
     def configure_optimizers(self):
+        # Use the learning rate from hyperparameters
         optimizer = optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
-        return optimizer
+        # Optional: Add learning rate scheduler
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=7, gamma=0.1)
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "monitor": "val_loss"
+            }
+        }
 
-def make_model(input_shape=(3, 80, 80), num_classes=4, learning_rate=0.001):
-    """Create a simple CNN model using PyTorch Lightning"""
-    return SimpleCNN(input_shape=input_shape, num_classes=num_classes, learning_rate=learning_rate)
-
-def compile_train_model(data_module, model=None, num_epochs=10, learning_rate=0.001, 
-                       num_classes=4, accelerator='auto'):
-    """Train the model using PyTorch Lightning DataModule"""
+def train_model(data_module, num_classes=4, learning_rate=0.001, max_epochs=10, 
+                accelerator='auto', devices='auto', input_shape=(3, 80, 80)):
+    """Train the model using PyTorch Lightning"""
     
-    if model is None:
-        model = make_model(num_classes=num_classes, learning_rate=learning_rate)
+    # Create model with the correct input shape
+    model = SimpleCNN(
+        num_classes=num_classes, 
+        learning_rate=learning_rate,
+        input_shape=input_shape
+    )
     
     # Setup callbacks
     checkpoint_callback = ModelCheckpoint(
         monitor='val_loss',
         dirpath='checkpoints/',
-        filename='best-checkpoint',
+        filename='best-checkpoint-{epoch:02d}-{val_loss:.2f}',
         save_top_k=1,
-        mode='min'
+        mode='min',
+        save_last=True
     )
     
     early_stop_callback = EarlyStopping(
         monitor='val_loss',
-        min_delta=0.00,
+        min_delta=0.001,
         patience=5,
-        verbose=False,
+        verbose=True,
         mode='min'
     )
     
     # Setup logger
-    logger = TensorBoardLogger('lightning_logs/', name='bee_wasp_model')
+    logger = TensorBoardLogger(
+        save_dir='lightning_logs/', 
+        name='bee_wasp_model',
+        version=None  # Auto-increment version
+    )
     
-    # Create trainer
-    trainer = Trainer(
-        max_epochs=num_epochs,
+    # Create trainer with more standard configuration
+    trainer = pl.Trainer(
+        max_epochs=max_epochs,
         callbacks=[checkpoint_callback, early_stop_callback],
         logger=logger,
         accelerator=accelerator,
-        log_every_n_steps=10
+        devices=devices,
+        log_every_n_steps=50,
+        enable_checkpointing=True,
+        enable_progress_bar=True,
+        enable_model_summary=True,
+        deterministic=True  # For reproducibility
     )
     
-    # Train the model using the DataModule
+    # Train the model
     trainer.fit(model, datamodule=data_module)
     
-    return model, trainer
+    # Load best checkpoint for testing
+    best_model = SimpleCNN.load_from_checkpoint(
+        checkpoint_callback.best_model_path,
+        num_classes=num_classes,
+        learning_rate=learning_rate,
+        input_shape=input_shape
+    )
+    
+    return best_model, trainer
 
-def evaluate_model(data_module, model, trainer=None):
-    """Evaluate the model using PyTorch Lightning DataModule"""
+def test_model(data_module, model, trainer=None):
+    """Test the model using PyTorch Lightning"""
     
     if trainer is None:
-        trainer = Trainer(accelerator='auto')
+        trainer = pl.Trainer(
+            accelerator='auto',
+            devices='auto',
+            logger=False,
+            enable_checkpointing=False,
+            enable_progress_bar=True
+        )
     
-    # Test the model using the DataModule
+    # Test the model
     results = trainer.test(model, datamodule=data_module)
     
-    # Print results
-    if results:
-        test_accuracy = results[0]['test_accuracy']
-        test_loss = results[0]['test_loss']
-        print(f"Test Accuracy: {test_accuracy:.4f}")
-        print(f"Test Loss: {test_loss:.4f}")
-    
     return results
+
