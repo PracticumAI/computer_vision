@@ -324,15 +324,16 @@ def load_display_data(
 class SimpleCNN(pl.LightningModule):
     """Simple CNN model using PyTorch Lightning"""
     
-    def __init__(self, num_classes=4, learning_rate=0.001, input_shape=(3, 80, 80)):
+    def __init__(self, num_classes=4, learning_rate=0.001, input_shape=(3, 80, 80), 
+                 dropout_rate=0.0, conv_padding=1):
         super().__init__()
         self.save_hyperparameters()
         
-        # Model architecture
-        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1)
-        self.pool = nn.MaxPool2d(kernel_size=2, stride=2, padding=0)
-        self.dropout = nn.Dropout(0.5)
+        # Model architecture with configurable padding and dropout
+        self.conv1 = nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=conv_padding)
+        self.conv2 = nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=conv_padding)
+        self.pool = nn.MaxPool2d(kernel_size=2, stride=2)  # No padding for pooling
+        self.dropout = nn.Dropout(dropout_rate)
         self.relu = nn.ReLU()
         
         # Dynamically calculate the correct input size for the first linear layer
@@ -360,7 +361,7 @@ class SimpleCNN(pl.LightningModule):
         x = self.pool(self.relu(self.conv2(x)))
         x = torch.flatten(x, 1)
         x = self.relu(self.fc1(x))
-        x = self.dropout(x)
+        x = self.dropout(x)  # Apply dropout before final layer
         x = self.fc2(x)
         return x
     
@@ -414,67 +415,68 @@ class SimpleCNN(pl.LightningModule):
         }
 
 def train_model(data_module, num_classes=4, learning_rate=0.001, max_epochs=10, 
-                accelerator='auto', devices='auto', input_shape=(3, 80, 80)):
-    """Train the model using PyTorch Lightning"""
+                accelerator='auto', devices='auto', input_shape=(3, 80, 80),
+                dropout_rate=0.5, conv_padding=1):
+    """Train a CNN model using PyTorch Lightning
     
-    # Create model with the correct input shape
+    Args:
+        data_module: Lightning DataModule for the dataset
+        num_classes: Number of classes for classification
+        learning_rate: Learning rate for optimizer
+        max_epochs: Maximum number of training epochs
+        accelerator: Device type ('auto', 'gpu', 'cpu')
+        devices: Number/type of devices to use
+        input_shape: Shape of input images (channels, height, width)
+        dropout_rate: Dropout probability (0.0 to 1.0)
+        conv_padding: Padding for convolutional layers
+    
+    Returns:
+        tuple: (trained_model, trainer)
+    """
+    
+    # Create model with configurable parameters
     model = SimpleCNN(
-        num_classes=num_classes, 
+        num_classes=num_classes,
         learning_rate=learning_rate,
-        input_shape=input_shape
+        input_shape=input_shape,
+        dropout_rate=dropout_rate,
+        conv_padding=conv_padding
     )
     
-    # Setup callbacks
-    checkpoint_callback = ModelCheckpoint(
-        monitor='val_loss',
-        dirpath='checkpoints/',
-        filename='best-checkpoint-{epoch:02d}-{val_loss:.2f}',
-        save_top_k=1,
-        mode='min',
-        save_last=True
-    )
+    # Create logger for TensorBoard
+    logger = TensorBoardLogger("lightning_logs", name="cnn_experiment")
     
-    early_stop_callback = EarlyStopping(
+    # Create callbacks for early stopping and model checkpointing
+    early_stopping = EarlyStopping(
         monitor='val_loss',
-        min_delta=0.001,
-        patience=5,
-        verbose=True,
+        patience=3,
+        verbose=False,
         mode='min'
     )
     
-    # Setup logger
-    logger = TensorBoardLogger(
-        save_dir='lightning_logs/', 
-        name='bee_wasp_model',
-        version=None  # Auto-increment version
+    checkpoint_callback = ModelCheckpoint(
+        monitor='val_acc',
+        dirpath='checkpoints/',
+        filename='best-checkpoint',
+        save_top_k=1,
+        mode='max'
     )
     
-    # Create trainer with more standard configuration
+    # Create trainer
     trainer = pl.Trainer(
         max_epochs=max_epochs,
-        callbacks=[checkpoint_callback, early_stop_callback],
-        logger=logger,
         accelerator=accelerator,
         devices=devices,
-        log_every_n_steps=50,
-        enable_checkpointing=True,
+        logger=logger,
+        callbacks=[early_stopping, checkpoint_callback],
         enable_progress_bar=True,
-        enable_model_summary=True,
-        deterministic=True  # For reproducibility
+        enable_model_summary=True
     )
     
     # Train the model
     trainer.fit(model, datamodule=data_module)
     
-    # Load best checkpoint for testing
-    best_model = SimpleCNN.load_from_checkpoint(
-        checkpoint_callback.best_model_path,
-        num_classes=num_classes,
-        learning_rate=learning_rate,
-        input_shape=input_shape
-    )
-    
-    return best_model, trainer
+    return model, trainer
 
 def test_model(data_module, model, trainer=None):
     """Test the model using PyTorch Lightning and display evaluation plots"""
@@ -510,6 +512,7 @@ def test_model(data_module, model, trainer=None):
                         
                         # Get scalar tags
                         scalar_tags = event_acc.Tags()['scalars']
+                        print(f"Available scalar tags: {scalar_tags}")  # Debug print
                         
                         # Initialize lists for metrics
                         train_losses = []
@@ -519,18 +522,34 @@ def test_model(data_module, model, trainer=None):
                         
                         # Extract training and validation metrics with more flexible matching
                         for tag in scalar_tags:
-                            if 'train' in tag.lower() and 'loss' in tag.lower() and 'epoch' in tag.lower():
+                            tag_lower = tag.lower()
+                                                       
+                            # Training loss - look for various patterns
+                            if ('train' in tag_lower and 'loss' in tag_lower and 
+                                ('epoch' in tag_lower or '_epoch' in tag_lower)):
                                 events = event_acc.Scalars(tag)
                                 train_losses = [(e.step, e.value) for e in events]
-                            elif 'val' in tag.lower() and 'loss' in tag.lower():
+
+                                
+                            # Validation loss
+                            elif 'val' in tag_lower and 'loss' in tag_lower:
                                 events = event_acc.Scalars(tag)
                                 val_losses = [(e.step, e.value) for e in events]
-                            elif 'train' in tag.lower() and 'acc' in tag.lower() and 'epoch' in tag.lower():
+
+                                
+                            # Training accuracy - look for various patterns
+                            elif ('train' in tag_lower and 'acc' in tag_lower and 
+                                  ('epoch' in tag_lower or '_epoch' in tag_lower)):
                                 events = event_acc.Scalars(tag)
                                 train_accs = [(e.step, e.value) for e in events]
-                            elif 'val' in tag.lower() and 'acc' in tag.lower():
+                                print(f"Found train acc: {tag} with {len(train_accs)} points")
+                                print(f"Sample train acc data: {train_accs[:3] if len(train_accs) > 0 else 'No data'}")
+                                
+                            # Validation accuracy
+                            elif 'val' in tag_lower and 'acc' in tag_lower:
                                 events = event_acc.Scalars(tag)
                                 val_accs = [(e.step, e.value) for e in events]
+
                     
                     except ImportError:
                         print("TensorBoard not available for reading logs. Skipping training plots.")
