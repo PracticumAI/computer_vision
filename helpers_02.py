@@ -18,7 +18,7 @@ try:
 except ImportError:
     print("Warning: ultralytics or torch not available. YOLO features will not work.")
 
-def download_file(url="https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits_detection.zip?rlkey=ofgre83fdxa98p7ity8j9z8ip&st=atv7sz18&dl=1", filename="fruits_detection.zip"):
+def download_file(url="", filename="fruits_detection.zip"):
 
     # Download the file using requests
     response = requests.get(url, stream=True)
@@ -57,7 +57,7 @@ def extract_file(filename, data_folder):
         # Print an error message
         print(f"{filename} is not a valid tar or zip file.")
     
-def manage_data(url="https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits_detection.zip?rlkey=ofgre83fdxa98p7ity8j9z8ip&st=atv7sz18&dl=1", filename="fruits_detection.zip", folder_name='fruits_detection', dest='data'):
+def manage_data(url="https://data.rc.ufl.edu/pub/practicum-ai/Computer_Vision/fruits_detection.tar.gz", filename="fruits_detection.tar.gz", folder_name='fruits_detection', dest='data'):
     '''Try to find the data for the exercise and return the path'''
     
     # Check common paths of where the data might be on different systems
@@ -91,7 +91,7 @@ def manage_data(url="https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits
         print(f'Data downloaded and unpacked. Now available at {os.path.join(dest,folder_name)}.')
         return os.path.normpath(os.path.join(dest,folder_name))   
 
-    print('Sorry, I cannot find the data. Please download it manually from https://www.dropbox.com/scl/fi/ioupfqya76b7p8m1v1kdc/fruits_detection.zip and unpack it to the data folder.')      
+    print('Sorry, I cannot find the data. Please download it manually from https://data.rc.ufl.edu/pub/practicum-ai/Computer_Vision/fruits_detection.tar.gz and unpack it to the data folder.')      
 
 
 def load_display_data(path, batch_size=32, shape=(80,80,3), show_pictures=True):

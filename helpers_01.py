@@ -95,9 +95,9 @@ def extract_file(filename, data_folder):
 
 
 def manage_data(
-    url="https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.gz?dl=1",
-    filename="bee_vs_wasp.tar.gz",
-    folder_name="bee_vs_wasp",
+    url="https://data.rc.ufl.edu/pub/practicum-ai/Computer_Vision/bee_vs_wasp_reduced.tar.gz",
+    filename="bee_vs_wasp_reduced.tar.gz",
+    folder_name="bee_vs_wasp_reduced",
     dest="data",
 ):
     """Try to find the data for the exercise and return the path"""
@@ -147,7 +147,7 @@ def manage_data(
     print(
         "Sorry, I cannot find the data."
         "Please download it manually from"
-        "https://www.dropbox.com/s/x70hm8mxqhe7fa6/bee_vs_wasp.tar.gz"
+        "https://data.rc.ufl.edu/pub/practicum-ai/Computer_Vision/bee_vs_wasp_reduced.tar.gz"
         "and unpack it to the data folder."
     )
 
