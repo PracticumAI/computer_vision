@@ -477,7 +477,7 @@ def train_model(data_module, num_classes=4, learning_rate=0.001, max_epochs=10,
     return best_model, trainer
 
 def test_model(data_module, model, trainer=None):
-    """Test the model using PyTorch Lightning"""
+    """Test the model using PyTorch Lightning and display evaluation plots"""
     
     if trainer is None:
         trainer = pl.Trainer(
@@ -490,6 +490,177 @@ def test_model(data_module, model, trainer=None):
     
     # Test the model
     results = trainer.test(model, datamodule=data_module)
+    
+    # Plot training and validation metrics if available
+    try:
+        # Extract metrics from the model's logged history
+        if hasattr(model, 'trainer') and model.trainer is not None:
+            # Check if we can access the logger's metrics
+            if hasattr(model.trainer, 'logger') and model.trainer.logger is not None:
+                logger = model.trainer.logger
+                
+                # For TensorBoard logger, we can access the log directory
+                if hasattr(logger, 'log_dir'):
+                    try:
+                        from tensorboard.backend.event_processing.event_accumulator import EventAccumulator
+                        
+                        # Create event accumulator to read the tensorboard logs
+                        event_acc = EventAccumulator(logger.log_dir)
+                        event_acc.Reload()
+                        
+                        # Get scalar tags
+                        scalar_tags = event_acc.Tags()['scalars']
+                        
+                        # Initialize lists for metrics
+                        train_losses = []
+                        val_losses = []
+                        train_accs = []
+                        val_accs = []
+                        
+                        # Extract training and validation metrics with more flexible matching
+                        for tag in scalar_tags:
+                            if 'train' in tag.lower() and 'loss' in tag.lower() and 'epoch' in tag.lower():
+                                events = event_acc.Scalars(tag)
+                                train_losses = [(e.step, e.value) for e in events]
+                            elif 'val' in tag.lower() and 'loss' in tag.lower():
+                                events = event_acc.Scalars(tag)
+                                val_losses = [(e.step, e.value) for e in events]
+                            elif 'train' in tag.lower() and 'acc' in tag.lower() and 'epoch' in tag.lower():
+                                events = event_acc.Scalars(tag)
+                                train_accs = [(e.step, e.value) for e in events]
+                            elif 'val' in tag.lower() and 'acc' in tag.lower():
+                                events = event_acc.Scalars(tag)
+                                val_accs = [(e.step, e.value) for e in events]
+                    
+                    except ImportError:
+                        print("TensorBoard not available for reading logs. Skipping training plots.")
+                        train_losses = val_losses = train_accs = val_accs = []
+                    except Exception as e:
+                        print(f"Could not read TensorBoard logs: {e}")
+                        train_losses = val_losses = train_accs = val_accs = []
+        
+        # Plot if we have data
+        if train_losses or val_losses or train_accs or val_accs:
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
+            
+            # Plot loss
+            loss_plotted = False
+            if train_losses:
+                epochs, losses = zip(*train_losses)
+                ax1.plot(epochs, losses, label='Training Loss', marker='o', linewidth=2)
+                loss_plotted = True
+            if val_losses:
+                epochs, losses = zip(*val_losses)
+                ax1.plot(epochs, losses, label='Validation Loss', marker='s', linewidth=2)
+                loss_plotted = True
+            
+            if loss_plotted:
+                ax1.set_title('Training and Validation Loss')
+                ax1.set_xlabel('Epoch')
+                ax1.set_ylabel('Loss')
+                ax1.legend()
+                ax1.grid(True, alpha=0.3)
+            else:
+                ax1.text(0.5, 0.5, 'No loss data available', ha='center', va='center', transform=ax1.transAxes)
+                ax1.set_title('Training and Validation Loss')
+            
+            # Plot accuracy
+            acc_plotted = False
+            if train_accs:
+                epochs, accs = zip(*train_accs)
+                ax2.plot(epochs, accs, label='Training Accuracy', marker='o', linewidth=2)
+                acc_plotted = True
+            if val_accs:
+                epochs, accs = zip(*val_accs)
+                ax2.plot(epochs, accs, label='Validation Accuracy', marker='s', linewidth=2)
+                acc_plotted = True
+            
+            if acc_plotted:
+                ax2.set_title('Training and Validation Accuracy')
+                ax2.set_xlabel('Epoch')
+                ax2.set_ylabel('Accuracy')
+                ax2.legend()
+                ax2.grid(True, alpha=0.3)
+            else:
+                ax2.text(0.5, 0.5, 'No accuracy data available', ha='center', va='center', transform=ax2.transAxes)
+                ax2.set_title('Training and Validation Accuracy')
+            
+            plt.tight_layout()
+            plt.show()
+        else:
+            print("Training metrics not available for plotting.")
+            print("This can happen if the model wasn't trained in this session.")
+        
+    except Exception as e:
+        print(f"Could not plot training metrics: {e}")
+        print("This is normal if training metrics aren't available.")
+    
+    # Generate confusion matrix for validation data
+    try:
+        model.eval()
+        all_predictions = []
+        all_labels = []
+        
+        # Get predictions from validation data
+        val_loader = data_module.val_dataloader()
+        device = next(model.parameters()).device
+        
+        with torch.no_grad():
+            for batch in val_loader:
+                inputs, labels = batch
+                inputs = inputs.to(device)
+                outputs = model(inputs)
+                predictions = torch.argmax(outputs, dim=1)
+                
+                all_predictions.extend(predictions.cpu().numpy())
+                all_labels.extend(labels.numpy())
+        
+        # Get class names
+        class_names, _ = data_module.get_class_info()
+        
+        # Create confusion matrix
+        cm = confusion_matrix(all_labels, all_predictions)
+        
+        # Plot confusion matrix
+        plt.figure(figsize=(8, 6))
+        plt.imshow(cm, interpolation='nearest', cmap=plt.cm.Blues)
+        plt.title('Confusion Matrix - Validation Data')
+        plt.colorbar()
+        
+        # Add labels
+        tick_marks = np.arange(len(class_names))
+        plt.xticks(tick_marks, class_names, rotation=45)
+        plt.yticks(tick_marks, class_names)
+        
+        # Add text annotations
+        thresh = cm.max() / 2.
+        for i in range(cm.shape[0]):
+            for j in range(cm.shape[1]):
+                plt.text(j, i, format(cm[i, j], 'd'),
+                        horizontalalignment="center",
+                        color="white" if cm[i, j] > thresh else "black")
+        
+        plt.ylabel('True Label')
+        plt.xlabel('Predicted Label')
+        plt.tight_layout()
+        plt.show()
+        
+        # Calculate and print per-class metrics
+        print("\nPer-class Performance:")
+        print("-" * 50)
+        for i, class_name in enumerate(class_names):
+            true_positives = cm[i, i]
+            false_positives = cm[:, i].sum() - true_positives
+            false_negatives = cm[i, :].sum() - true_positives
+            
+            precision = true_positives / (true_positives + false_positives) if (true_positives + false_positives) > 0 else 0
+            recall = true_positives / (true_positives + false_negatives) if (true_positives + false_negatives) > 0 else 0
+            f1 = 2 * (precision * recall) / (precision + recall) if (precision + recall) > 0 else 0
+            
+            print(f"{class_name:>15}: Precision={precision:.3f}, Recall={recall:.3f}, F1={f1:.3f}")
+        
+    except Exception as e:
+        print(f"Could not generate confusion matrix: {e}")
     
     return results
 
