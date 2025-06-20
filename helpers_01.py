@@ -520,36 +520,36 @@ def test_model(data_module, model, trainer=None):
                         train_accs = []
                         val_accs = []
                         
-                        # Extract training and validation metrics with more flexible matching
+                        # Extract training and validation metrics - focus on epoch-level only
                         for tag in scalar_tags:
                             tag_lower = tag.lower()
-                                                       
-                            # Training loss - look for various patterns
+                            print(f"Processing tag: {tag}")  # Debug print
+                            
+                            # Training loss - look for epoch-level metrics only (exclude step-level)
                             if ('train' in tag_lower and 'loss' in tag_lower and 
-                                ('epoch' in tag_lower or '_epoch' in tag_lower)):
+                                'epoch' in tag_lower and 'step' not in tag_lower):
                                 events = event_acc.Scalars(tag)
                                 train_losses = [(e.step, e.value) for e in events]
-
+                                print(f"Found train loss: {tag} with {len(train_losses)} points")
                                 
-                            # Validation loss
-                            elif 'val' in tag_lower and 'loss' in tag_lower:
+                            # Validation loss - these are typically epoch-level by default
+                            elif 'val' in tag_lower and 'loss' in tag_lower and 'step' not in tag_lower:
                                 events = event_acc.Scalars(tag)
                                 val_losses = [(e.step, e.value) for e in events]
-
+                                print(f"Found val loss: {tag} with {len(val_losses)} points")
                                 
-                            # Training accuracy - look for various patterns
+                            # Training accuracy - look for epoch-level metrics only (exclude step-level)
                             elif ('train' in tag_lower and 'acc' in tag_lower and 
-                                  ('epoch' in tag_lower or '_epoch' in tag_lower)):
+                                  'epoch' in tag_lower and 'step' not in tag_lower):
                                 events = event_acc.Scalars(tag)
                                 train_accs = [(e.step, e.value) for e in events]
                                 print(f"Found train acc: {tag} with {len(train_accs)} points")
-                                print(f"Sample train acc data: {train_accs[:3] if len(train_accs) > 0 else 'No data'}")
                                 
-                            # Validation accuracy
-                            elif 'val' in tag_lower and 'acc' in tag_lower:
+                            # Validation accuracy - these are typically epoch-level by default
+                            elif 'val' in tag_lower and 'acc' in tag_lower and 'step' not in tag_lower:
                                 events = event_acc.Scalars(tag)
                                 val_accs = [(e.step, e.value) for e in events]
-
+                                print(f"Found val acc: {tag} with {len(val_accs)} points")
                     
                     except ImportError:
                         print("TensorBoard not available for reading logs. Skipping training plots.")
@@ -682,4 +682,216 @@ def test_model(data_module, model, trainer=None):
         print(f"Could not generate confusion matrix: {e}")
     
     return results
+
+class BeeWaspAugmentedDataModule(pl.LightningDataModule):
+    """PyTorch Lightning DataModule for Bee vs Wasp dataset with data augmentation"""
+    
+    def __init__(self, data_path, batch_size=32, shape=(80, 80, 3), train_split=0.8, num_workers=4, 
+                 augmentation_strength='light'):
+        super().__init__()
+        self.data_path = data_path
+        self.batch_size = batch_size
+        self.shape = shape
+        self.train_split = train_split
+        self.num_workers = num_workers
+        self.augmentation_strength = augmentation_strength
+        
+        # Define different augmentation levels
+        if augmentation_strength == 'none':
+            self.train_transform = transforms.Compose([
+                transforms.Resize(shape[:2]),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        elif augmentation_strength == 'light':
+            self.train_transform = transforms.Compose([
+                transforms.Resize(shape[:2]),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(degrees=10),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        elif augmentation_strength == 'medium':
+            self.train_transform = transforms.Compose([
+                transforms.Resize(shape[:2]),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(degrees=15),
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
+                transforms.RandomResizedCrop(size=shape[:2], scale=(0.8, 1.0)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        elif augmentation_strength == 'heavy':
+            self.train_transform = transforms.Compose([
+                transforms.Resize(shape[:2]),
+                transforms.RandomHorizontalFlip(p=0.5),
+                transforms.RandomRotation(degrees=20),
+                transforms.ColorJitter(brightness=0.3, contrast=0.3, saturation=0.3, hue=0.1),
+                transforms.RandomResizedCrop(size=shape[:2], scale=(0.7, 1.0)),
+                transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 2.0)),
+                transforms.ToTensor(),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            ])
+        
+        # Validation transform (no augmentation)
+        self.val_transform = transforms.Compose([
+            transforms.Resize(shape[:2]),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        
+        self.train_dataset = None
+        self.val_dataset = None
+        
+    def setup(self, stage=None):
+        """Setup datasets for training and validation"""
+        if stage == 'fit' or stage is None:
+            # Create separate datasets with different transforms
+            full_dataset = ImageFolder(self.data_path)
+            
+            # Split indices
+            train_size = int(self.train_split * len(full_dataset))
+            val_size = len(full_dataset) - train_size
+            train_indices, val_indices = random_split(
+                range(len(full_dataset)), [train_size, val_size],
+                generator=torch.Generator().manual_seed(42)
+            )
+            
+            # Create training dataset with augmentation
+            train_samples = [full_dataset.samples[i] for i in train_indices]
+            self.train_dataset = ImageFolder(self.data_path, transform=self.train_transform)
+            self.train_dataset.samples = train_samples
+            self.train_dataset.targets = [s[1] for s in train_samples]
+            
+            # Create validation dataset without augmentation
+            val_samples = [full_dataset.samples[i] for i in val_indices]
+            self.val_dataset = ImageFolder(self.data_path, transform=self.val_transform)
+            self.val_dataset.samples = val_samples
+            self.val_dataset.targets = [s[1] for s in val_samples]
+            
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            num_workers=self.num_workers,
+            persistent_workers=True if self.num_workers > 0 else False
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=False, 
+            num_workers=self.num_workers,
+            persistent_workers=True if self.num_workers > 0 else False
+        )
+    
+    def test_dataloader(self):
+        # Use validation set as test set for now
+        return self.val_dataloader()
+    
+    def get_class_info(self):
+        """Get class names and counts"""
+        full_dataset = ImageFolder(self.data_path)
+        class_names = full_dataset.classes
+        cls_counts = {class_name: 0 for class_name in class_names}
+        
+        # Count images per class
+        for _, label_idx in full_dataset.samples:
+            class_name = class_names[label_idx]
+            cls_counts[class_name] += 1
+            
+        return class_names, cls_counts
+
+def load_display_data_augmented(
+    path,
+    batch_size=32,
+    shape=(80, 80, 3),
+    show_pictures=True,
+    return_cls_counts=False,
+    train_split=0.8,
+    num_workers=4,
+    augmentation_strength='light'
+):
+    """Creates a PyTorch Lightning DataModule with data augmentation and optionally displays sample images"""
+    print("******************************************************************")
+    print("Load data with augmentation:")
+    print(f"  - Loading the dataset from: {path}.")
+    print(f"  - Using a batch size of: {batch_size}.")
+    print(f"  - Resizing input images to: {shape}.")
+    print(f"  - Train/validation split: {train_split:.1%}/{1-train_split:.1%}")
+    print(f"  - Using {num_workers} workers for data loading")
+    print(f"  - Augmentation strength: {augmentation_strength}")
+    print(f"  - Returning class counts for later use? {return_cls_counts}")
+    print("******************************************************************")
+
+    # Create DataModule with augmentation
+    data_module = BeeWaspAugmentedDataModule(
+        data_path=path,
+        batch_size=batch_size,
+        shape=shape,
+        train_split=train_split,
+        num_workers=num_workers,
+        augmentation_strength=augmentation_strength
+    )
+    
+    # Setup the data module
+    data_module.setup('fit')
+    
+    # Get class information
+    class_names, cls_counts = data_module.get_class_info()
+    
+    # Print class distribution
+    total_images = sum(cls_counts.values())
+    print("\nFor the full dataset: ")
+    print("   Class          # of images     # of total")
+    print("--------------------------------------------")
+    for class_name in class_names:
+        count = cls_counts[class_name]
+        percentage = count / total_images * 100
+        print(f"{class_name:>15} {count:11}         {percentage:.1f}%")
+    print("--------------------------------------------")
+
+    if show_pictures:
+        print(f'The classes in your dataset are: {class_names}')
+
+        # Show comparison between original and augmented images
+        fig, axes = plt.subplots(2, 6, figsize=(18, 6))
+        
+        # Get a batch from training data (with augmentation)
+        train_loader = data_module.train_dataloader()
+        aug_images, aug_labels = next(iter(train_loader))
+        
+        # Get a batch from validation data (without augmentation)
+        val_loader = data_module.val_dataloader()
+        orig_images, orig_labels = next(iter(val_loader))
+        
+        # Show first 6 images
+        for i in range(6):
+            # Original images (top row)
+            img = orig_images[i].numpy().transpose(1, 2, 0)
+            img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+            img = np.clip(img, 0, 1)
+            axes[0, i].imshow(img)
+            axes[0, i].set_title(f"Original: {class_names[orig_labels[i]]}")
+            axes[0, i].axis('off')
+            
+            # Augmented images (bottom row)
+            img = aug_images[i].numpy().transpose(1, 2, 0)
+            img = img * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+            img = np.clip(img, 0, 1)
+            axes[1, i].imshow(img)
+            axes[1, i].set_title(f"Augmented: {class_names[aug_labels[i]]}")
+            axes[1, i].axis('off')
+        
+        plt.suptitle(f"Data Augmentation Comparison (Strength: {augmentation_strength})")
+        plt.tight_layout()
+        plt.show()
+
+    if return_cls_counts:
+        print(f"\nClass counts being returned: {cls_counts}.")
+        return data_module, cls_counts
+
+    return data_module
 
