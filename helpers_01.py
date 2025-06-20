@@ -137,93 +137,181 @@ def manage_data(
 
     return None
 
+class BeeWaspDataModule(pl.LightningDataModule):
+    """PyTorch Lightning DataModule for Bee vs Wasp dataset"""
+    
+    def __init__(self, data_path, batch_size=32, shape=(80, 80, 3), train_split=0.8, num_workers=4):
+        super().__init__()
+        self.data_path = data_path
+        self.batch_size = batch_size
+        self.shape = shape
+        self.train_split = train_split
+        self.num_workers = num_workers
+        
+        # Define transforms
+        self.transform = transforms.Compose([
+            transforms.Resize(shape[:2]),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+        ])
+        
+        self.dataset = None
+        self.train_dataset = None
+        self.val_dataset = None
+        
+    def setup(self, stage=None):
+        """Setup datasets for training and validation"""
+        if self.dataset is None:
+            self.dataset = ImageFolder(self.data_path, transform=self.transform)
+        
+        if stage == 'fit' or stage is None:
+            # Split dataset
+            train_size = int(self.train_split * len(self.dataset))
+            val_size = len(self.dataset) - train_size
+            self.train_dataset, self.val_dataset = random_split(
+                self.dataset, [train_size, val_size],
+                generator=torch.Generator().manual_seed(42)  # For reproducibility
+            )
+            
+    def train_dataloader(self):
+        return DataLoader(
+            self.train_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=True, 
+            num_workers=self.num_workers,
+            persistent_workers=True if self.num_workers > 0 else False
+        )
+    
+    def val_dataloader(self):
+        return DataLoader(
+            self.val_dataset, 
+            batch_size=self.batch_size, 
+            shuffle=False, 
+            num_workers=self.num_workers,
+            persistent_workers=True if self.num_workers > 0 else False
+        )
+    
+    def test_dataloader(self):
+        # Use validation set as test set for now
+        return self.val_dataloader()
+    
+    def get_class_info(self):
+        """Get class names and counts"""
+        if self.dataset is None:
+            self.dataset = ImageFolder(self.data_path, transform=self.transform)
+        
+        class_names = self.dataset.classes
+        cls_counts = {class_name: 0 for class_name in class_names}
+        
+        # Count images per class
+        for _, label_idx in self.dataset.samples:
+            class_name = class_names[label_idx]
+            cls_counts[class_name] += 1
+            
+        return class_names, cls_counts
 
 def load_display_data(
     path,
     batch_size=32,
     shape=(80, 80, 3),
     show_pictures=True,
-    stratify=False,
     return_cls_counts=False,
+    train_split=0.8,
+    num_workers=4,
 ):
-    """Takes a path, batch size, target shape for images and optionally
-    whether to show sample images. Returns training and validation datasets
-    """
+    """Creates a PyTorch Lightning DataModule and optionally displays sample images"""
     print("******************************************************************")
     print("Load data:")
     print(f"  - Loading the dataset from: {path}.")
     print(f"  - Using a batch size of: {batch_size}.")
     print(f"  - Resizing input images to: {shape}.")
-    print(f"  - Stratify when sampling? {stratify}")
+    print(f"  - Train/validation split: {train_split:.1%}/{1-train_split:.1%}")
+    print(f"  - Using {num_workers} workers for data loading")
     print(f"  - Returning class counts for later use? {return_cls_counts}")
     print("******************************************************************")
 
-    # Get the class names and count images
-    path_obj = Path(path)
-    class_names = [item.name for item in path_obj.iterdir() if item.is_dir()]
+    # Create DataModule
+    data_module = BeeWaspDataModule(
+        data_path=path,
+        batch_size=batch_size,
+        shape=shape,
+        train_split=train_split,
+        num_workers=num_workers
+    )
     
-    images = []
-    labels = []
-    cls_counts = {}
-
-    for class_name in class_names:
-        class_path = path_obj / class_name
-        class_images = [str(img) for img in class_path.iterdir() if img.is_file()]
-        images.extend(class_images)
-        labels.extend([class_name] * len(class_images))
-        cls_counts[class_name] = len(class_images)
-
+    # Setup the data module
+    data_module.setup('fit')
+    
+    # Get class information
+    class_names, cls_counts = data_module.get_class_info()
+    
     # Print class distribution
+    total_images = len(data_module.dataset)
     print("\nFor the full dataset: ")
     print("   Class          # of images     # of total")
     print("--------------------------------------------")
     for class_name in class_names:
         count = cls_counts[class_name]
-        percentage = count / len(labels) * 100
+        percentage = count / total_images * 100
         print(f"{class_name:>15} {count:11}         {percentage:.1f}%")
     print("--------------------------------------------")
-    
-    # Define transformations
-    transform = transforms.Compose([
-        transforms.Resize(shape[:2]),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-    ])
-
-    # Load dataset and create data loaders
-    dataset = ImageFolder(path, transform=transform)
-    
-    # Use random split (stratification would require more complex implementation)
-    train_size = int(0.8 * len(dataset))
-    val_size = len(dataset) - train_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    
-    data_train = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    data_val = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     if show_pictures:
-        print(f'The classes in your dataset are: {dataset.classes}')
+        print(f'The classes in your dataset are: {class_names}')
 
-        # Display up to 3 images from each class
-        for class_name in class_names:
-            plt.figure(figsize=(10, 3))
-            class_images = [img for img, label in zip(images, labels) if label == class_name]
-            num_images = min(3, len(class_images))
-            selected_images = np.random.choice(class_images, num_images, replace=False)
-
-            for i, image_path in enumerate(selected_images):
-                image = Image.open(image_path)
-                plt.subplot(1, num_images, i + 1)
-                plt.imshow(image)
-                plt.axis("off")
-                plt.title(class_name)
-            plt.show()
+        # Get a batch from the training dataloader for display
+        train_loader = data_module.train_dataloader()
+        images, labels = next(iter(train_loader))
+        
+        # Convert to numpy and denormalize for display
+        images = images.numpy()
+        
+        # Create subplots: one row per class, 3 columns per row
+        fig, axes = plt.subplots(len(class_names), 3, figsize=(12, 3 * len(class_names)))
+        
+        # Handle case where there's only one class (axes would be 1D)
+        if len(class_names) == 1:
+            axes = axes.reshape(1, -1)
+        
+        # Track how many images we've shown per class
+        shown_per_class = {class_name: 0 for class_name in class_names}
+        
+        # Go through images and place them in the grid
+        for img, label in zip(images, labels):
+            class_name = class_names[label.item()]
+            class_idx = label.item()
+            
+            # Only show up to 3 images per class
+            if shown_per_class[class_name] < 3:
+                col_idx = shown_per_class[class_name]
+                
+                # Denormalize image for display
+                img_display = img.transpose(1, 2, 0)
+                img_display = img_display * np.array([0.229, 0.224, 0.225]) + np.array([0.485, 0.456, 0.406])
+                img_display = np.clip(img_display, 0, 1)
+                
+                # Display the image
+                axes[class_idx, col_idx].imshow(img_display)
+                axes[class_idx, col_idx].set_title(f"{class_name}")
+                axes[class_idx, col_idx].axis('off')
+                
+                shown_per_class[class_name] += 1
+        
+        # Hide any unused subplots (if we don't have enough images for some classes)
+        for class_idx in range(len(class_names)):
+            for col_idx in range(3):
+                class_name = class_names[class_idx]
+                if shown_per_class[class_name] <= col_idx:
+                    axes[class_idx, col_idx].axis('off')
+        
+        plt.tight_layout()
+        plt.show()
 
     if return_cls_counts:
         print(f"\nClass counts being returned: {cls_counts}.")
-        return data_train, data_val, cls_counts
+        return data_module, cls_counts
 
-    return data_train, data_val
+    return data_module
 
 class SimpleCNN(pl.LightningModule):
     """Simple CNN model using PyTorch Lightning"""
@@ -304,9 +392,9 @@ def make_model(input_shape=(3, 80, 80), num_classes=4, learning_rate=0.001):
     """Create a simple CNN model using PyTorch Lightning"""
     return SimpleCNN(input_shape=input_shape, num_classes=num_classes, learning_rate=learning_rate)
 
-def compile_train_model(train_loader, val_loader, model=None, num_epochs=10, learning_rate=0.001, 
+def compile_train_model(data_module, model=None, num_epochs=10, learning_rate=0.001, 
                        num_classes=4, accelerator='auto'):
-    """Train the model using PyTorch Lightning"""
+    """Train the model using PyTorch Lightning DataModule"""
     
     if model is None:
         model = make_model(num_classes=num_classes, learning_rate=learning_rate)
@@ -340,19 +428,19 @@ def compile_train_model(train_loader, val_loader, model=None, num_epochs=10, lea
         log_every_n_steps=10
     )
     
-    # Train the model
-    trainer.fit(model, train_loader, val_loader)
+    # Train the model using the DataModule
+    trainer.fit(model, datamodule=data_module)
     
     return model, trainer
 
-def evaluate_model(test_loader, model, trainer=None):
-    """Evaluate the model using PyTorch Lightning"""
+def evaluate_model(data_module, model, trainer=None):
+    """Evaluate the model using PyTorch Lightning DataModule"""
     
     if trainer is None:
         trainer = Trainer(accelerator='auto')
     
-    # Test the model
-    results = trainer.test(model, test_loader)
+    # Test the model using the DataModule
+    results = trainer.test(model, datamodule=data_module)
     
     # Print results
     if results:
