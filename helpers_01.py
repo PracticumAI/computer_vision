@@ -175,7 +175,7 @@ def manage_data(
 
 
 def manage_full_data(
-    url="https://data.rc.ufl.edu/pub/practicum-ai/web/public/Computer_Vision/bee_vs_wasp.tar.gz",
+    url="https://data.rc.ufl.edu/pub/practicum-ai/Computer_Vision/bee_vs_wasp.tar.gz",
     filename="bee_vs_wasp.tar.gz",
     folder_name="bee_vs_wasp",
     dest="data",
