@@ -117,24 +117,22 @@ def extract_file(filename, data_folder):
         if filename.endswith(".tar.gz") or filename.endswith(".tgz"):
             print(f"Extracting compressed tar file: {filename}")
             with tarfile.open(filename, "r:gz") as tar:
-                tar.extractall(data_folder, filter="data")
+                tar.extractall(data_folder)
         # For .tar files, use 'r' mode
         elif filename.endswith(".tar"):
             print(f"Extracting tar file: {filename}")
             with tarfile.open(filename, "r") as tar:
-                tar.extractall(data_folder, filter="data")
+                tar.extractall(data_folder)
         # Try to detect automatically as fallback
         elif tarfile.is_tarfile(filename):
             print(f"Extracting tar file (auto-detected): {filename}")
             with tarfile.open(filename, "r:*") as tar:  # Auto-detect compression
-                tar.extractall(data_folder, filter="data")
+                tar.extractall(data_folder)
         else:
             print(f"Error: {filename} is not a recognized tar file format.")
             return False
-
         print(f"Successfully extracted {filename} to {data_folder}")
         return True
-
     except Exception as e:
         print(f"Error extracting {filename}: {str(e)}")
         return False
