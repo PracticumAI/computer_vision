@@ -1457,7 +1457,23 @@ def load_imbalanced_data(
         num_workers: Number of worker processes for data loading
         use_weighted_sampler: Whether to use weighted sampling for class balance
         show_class_distribution: Whether to print the class distribution
+
+    Returns:
+        BeeWaspWeightedDataModule: Configured data module
+
+    Raises:
+        FileNotFoundError: If the dataset path doesn't exist
+        ValueError: If the path is None or invalid
     """
+    # Validate the path
+    if path is None:
+        raise ValueError(
+            "Dataset path cannot be None. Please provide a valid path to the dataset."
+        )
+
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Dataset path does not exist: {path}")
+
     print("******************************************************************")
     print("Load imbalanced data:")
     print(f"  - Loading the dataset from: {path}.")
