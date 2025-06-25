@@ -180,7 +180,7 @@ def manage_full_data(
     folder_name="bee_vs_wasp",
     dest="data",
 ):
-    """Try to find the full (non-subsampled) bee vs wasp data for data imbalance exercises"""
+    """Try to find the data for the data imbalance exercise and return the path"""
 
     # Check common paths of where the data might be on different systems
     likely_paths = [
@@ -192,11 +192,11 @@ def manage_full_data(
 
     for path in likely_paths:
         if path.exists() and path.is_dir():
-            print(f"Found full dataset at: {path}")
+            print(f"Found data at: {path}")
             return str(path)
 
     prompt = (
-        "Could not find the full bee vs wasp dataset in the common locations. "
+        "Could not find data in the common locations. "
         "Do you know the path? (yes/no): "
     )
     answer = input(prompt)
@@ -209,45 +209,13 @@ def manage_full_data(
             print("Path does not exist.")
             return None
 
-    answer = input("Do you want to download the full dataset? (yes/no): ")
+    answer = input("Do you want to download the data? (yes/no): ")
 
     if answer.lower() == "yes":
         print(f"Downloading {filename}...")
-        success = download_file(url, filename)
-        if not success:
-            print("Failed to download the dataset.")
-            return None
-
-        print(f"Extracting {filename}...")
-        extraction_success = extract_file(filename, dest)
-        if not extraction_success:
-            print("Failed to extract the dataset.")
-            return None
-
-        # Check if the expected folder was created
-        expected_path = Path(dest) / folder_name
-        if expected_path.exists() and expected_path.is_dir():
-            print(f"Dataset successfully downloaded and extracted to: {expected_path}")
-            return str(expected_path)
-        else:
-            print(
-                f"Warning: Expected folder {expected_path} was not found after extraction."
-            )
-            # Try to find what was actually extracted
-            try:
-                extracted_items = list(Path(dest).iterdir())
-                print(
-                    f"Items found in {dest}: {[item.name for item in extracted_items]}"
-                )
-
-                # Look for a folder that might be the dataset
-                for item in extracted_items:
-                    if item.is_dir() and "bee" in item.name.lower():
-                        print(f"Found potential dataset folder: {item}")
-                        return str(item)
-            except Exception as e:
-                print(f"Could not examine extracted contents: {e}")
-            return None
+        download_file(url, filename)
+        extract_file(filename, dest)
+        return str(Path(dest) / folder_name)
 
     print(
         "Sorry, I cannot find the data."
