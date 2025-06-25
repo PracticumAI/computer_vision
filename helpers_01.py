@@ -104,37 +104,20 @@ def download_file(url, filename):
 
 
 def extract_file(filename, data_folder):
-    """Extract a tar file to a specified folder"""
+    import tarfile, os
 
-    # Check if the file exists first
     if not os.path.exists(filename):
         print(f"Error: File {filename} does not exist.")
         return False
-
-    # Try to extract the file - handle both .tar and .tar.gz files
     try:
-        # For .tar.gz files, use 'r:gz' mode
-        if filename.endswith(".tar.gz") or filename.endswith(".tgz"):
-            print(f"Extracting compressed tar file: {filename}")
-            with tarfile.open(filename, "r:gz") as tar:
-                tar.extractall(data_folder)
-        # For .tar files, use 'r' mode
-        elif filename.endswith(".tar"):
-            print(f"Extracting tar file: {filename}")
-            with tarfile.open(filename, "r") as tar:
-                tar.extractall(data_folder)
-        # Try to detect automatically as fallback
-        elif tarfile.is_tarfile(filename):
-            print(f"Extracting tar file (auto-detected): {filename}")
-            with tarfile.open(filename, "r:*") as tar:  # Auto-detect compression
-                tar.extractall(data_folder)
-        else:
-            print(f"Error: {filename} is not a recognized tar file format.")
-            return False
-        print(f"Successfully extracted {filename} to {data_folder}")
+        with tarfile.open(filename, "r:gz") as tar:
+            tar.extractall(data_folder)
+        print(f"Extracted {filename} to {data_folder}")
+        # Print what was extracted
+        print("Extracted folders:", os.listdir(data_folder))
         return True
     except Exception as e:
-        print(f"Error extracting {filename}: {str(e)}")
+        print(f"Error extracting {filename}: {e}")
         return False
 
 
