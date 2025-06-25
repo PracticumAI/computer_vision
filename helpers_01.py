@@ -72,37 +72,72 @@ class ImageDataset(Dataset):
 def download_file(url, filename):
     """Download a file from a URL and save it to the current directory"""
     try:
+        print(f"Requesting download from: {url}")
         response = requests.get(url, stream=True, timeout=60)
+        response.raise_for_status()  # Raises an HTTPError for bad responses
+
+        print(f"Writing to file: {filename}")
+        with open(filename, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                f.write(chunk)
+
+        # Wait for file to be completely written
+        max_wait = 10  # maximum 10 seconds
+        wait_count = 0
+        while not Path(filename).exists() and wait_count < max_wait:
+            time.sleep(1)
+            wait_count += 1
+
+        if Path(filename).exists():
+            print(f"Downloaded {filename} successfully.")
+            return True
+        else:
+            print(f"Error: File {filename} was not created after download.")
+            return False
+
     except requests.exceptions.RequestException as e:
         print(f"Failed to download {url}: {e}")
-        return
-
-    with open(filename, "wb") as f:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-
-    while not Path(filename).exists():
-        time.sleep(1)
-
-    print(f"Downloaded {filename} successfully.")
+        return False
+    except Exception as e:
+        print(f"Unexpected error during download: {e}")
+        return False
 
 
 def extract_file(filename, data_folder):
     """Extract a tar file to a specified folder"""
 
-    # Check if the file is a tar file
-    if tarfile.is_tarfile(filename):
-        # Open the tar file
-        tar = tarfile.open(filename, "r:gz")
-        # Extract all the files to the data folder, filter for security
-        tar.extractall(data_folder, filter="data")
-        # Close the tar file
-        tar.close()
-        # Print a success message
-        print(f"Extracted {filename} to {data_folder} successfully.")
-    else:
-        # Print an error message
-        print(f"{filename} is not a valid tar file.")
+    # Check if the file exists first
+    if not os.path.exists(filename):
+        print(f"Error: File {filename} does not exist.")
+        return False
+
+    # Try to extract the file - handle both .tar and .tar.gz files
+    try:
+        # For .tar.gz files, use 'r:gz' mode
+        if filename.endswith(".tar.gz") or filename.endswith(".tgz"):
+            print(f"Extracting compressed tar file: {filename}")
+            with tarfile.open(filename, "r:gz") as tar:
+                tar.extractall(data_folder, filter="data")
+        # For .tar files, use 'r' mode
+        elif filename.endswith(".tar"):
+            print(f"Extracting tar file: {filename}")
+            with tarfile.open(filename, "r") as tar:
+                tar.extractall(data_folder, filter="data")
+        # Try to detect automatically as fallback
+        elif tarfile.is_tarfile(filename):
+            print(f"Extracting tar file (auto-detected): {filename}")
+            with tarfile.open(filename, "r:*") as tar:  # Auto-detect compression
+                tar.extractall(data_folder, filter="data")
+        else:
+            print(f"Error: {filename} is not a recognized tar file format.")
+            return False
+
+        print(f"Successfully extracted {filename} to {data_folder}")
+        return True
+
+    except Exception as e:
+        print(f"Error extracting {filename}: {str(e)}")
+        return False
 
 
 def manage_data(
@@ -197,9 +232,41 @@ def manage_full_data(
 
     if answer.lower() == "yes":
         print(f"Downloading {filename}...")
-        download_file(url, filename)
-        extract_file(filename, dest)
-        return str(Path(dest) / folder_name)
+        success = download_file(url, filename)
+        if not success:
+            print("Failed to download the dataset.")
+            return None
+
+        print(f"Extracting {filename}...")
+        extraction_success = extract_file(filename, dest)
+        if not extraction_success:
+            print("Failed to extract the dataset.")
+            return None
+
+        # Check if the expected folder was created
+        expected_path = Path(dest) / folder_name
+        if expected_path.exists() and expected_path.is_dir():
+            print(f"Dataset successfully downloaded and extracted to: {expected_path}")
+            return str(expected_path)
+        else:
+            print(
+                f"Warning: Expected folder {expected_path} was not found after extraction."
+            )
+            # Try to find what was actually extracted
+            try:
+                extracted_items = list(Path(dest).iterdir())
+                print(
+                    f"Items found in {dest}: {[item.name for item in extracted_items]}"
+                )
+
+                # Look for a folder that might be the dataset
+                for item in extracted_items:
+                    if item.is_dir() and "bee" in item.name.lower():
+                        print(f"Found potential dataset folder: {item}")
+                        return str(item)
+            except Exception as e:
+                print(f"Could not examine extracted contents: {e}")
+            return None
 
     print(
         "Sorry, I cannot find the data."
