@@ -1,6 +1,8 @@
 # Tensorboard log and YOLO runs folders
 logs/
 runs/
+lightning_logs/
+checkpoints/
 
 # data folder and fruits_detection file
 data/
@@ -172,3 +174,4 @@ data/
 /data
 datasets/
 /datasets
+bee_vs_wasp_reduced.tar.gz

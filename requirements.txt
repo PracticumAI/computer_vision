@@ -1,0 +1,13 @@
+torch
+torchvision
+pytorch-lightning
+tensorboard
+scikit-learn
+matplotlib
+pillow
+numpy
+pandas
+pathlib
+requests
+tensorboard
+timm
