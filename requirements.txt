@@ -10,3 +10,4 @@ pandas
 pathlib
 requests
 tensorboard
+timm
