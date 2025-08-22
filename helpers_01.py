@@ -1346,7 +1346,7 @@ def train_transfer_model(
 
 
 class BeeWaspWeightedDataModule(pl.LightningDataModule):
-    """PyTorch Lightning DataModule for Bee vs Wasp dataset with weighted sampling for class imbalance"""
+    """Optimized PyTorch Lightning DataModule for Bee vs Wasp dataset with faster setup"""
 
     def __init__(
         self,
@@ -1377,17 +1377,27 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
         )
 
     def setup(self, stage=None):
+        print("Setting up data module (optimized version)...")
+        
         # Load full dataset
         self.dataset = ImageFolder(root=self.data_path, transform=self.transform)
 
-        # Get class names and counts
+        # Get class names efficiently
         self.class_names = self.dataset.classes
-        self.class_counts = {cls: 0 for cls in self.class_names}
-
-        # Count samples per class
-        for _, label in self.dataset:
-            class_name = self.class_names[label]
-            self.class_counts[class_name] += 1
+        
+        # Count files directly from filesystem (much faster than loading images)
+        print("Counting class distribution from filesystem...")
+        self.class_counts = {}
+        data_path = Path(self.data_path)
+        
+        for class_name in self.class_names:
+            class_dir = data_path / class_name
+            # Count image files directly
+            image_files = []
+            for ext in ['*.jpg', '*.jpeg', '*.png', '*.bmp', '*.tiff']:
+                image_files.extend(list(class_dir.glob(ext)))
+                image_files.extend(list(class_dir.glob(ext.upper())))
+            self.class_counts[class_name] = len(image_files)
 
         # Split dataset
         train_size = int(self.train_split * len(self.dataset))
@@ -1399,10 +1409,12 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
             generator=torch.Generator().manual_seed(42),
         )
 
-        # Calculate class weights for weighted sampling
+        # Calculate class weights for weighted sampling (optimized)
         if self.use_weighted_sampler:
-            # Get labels for training set
-            train_labels = [self.dataset[idx][1] for idx in self.train_dataset.indices]
+            print("Calculating sample weights for balanced sampling...")
+            
+            # Get labels efficiently from dataset.samples (no image loading)
+            train_labels = [self.dataset.samples[idx][1] for idx in self.train_dataset.indices]
 
             # Calculate class weights (inverse frequency)
             class_counts = torch.bincount(torch.tensor(train_labels))
@@ -1411,11 +1423,13 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
 
             # Create sample weights
             self.sample_weights = [class_weights[label] for label in train_labels]
+            
+        print("Data module setup complete!")
 
     def train_dataloader(self):
         if self.use_weighted_sampler:
             # Use WeightedRandomSampler for balanced sampling
-            sampler = torch.utils.data.WeightedRandomSampler(
+            sampler = WeightedRandomSampler(
                 weights=self.sample_weights,
                 num_samples=len(self.sample_weights),
                 replacement=True,
@@ -1426,6 +1440,7 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
                 sampler=sampler,
                 num_workers=self.num_workers,
                 persistent_workers=True if self.num_workers > 0 else False,
+                pin_memory=True if torch.cuda.is_available() else False,
             )
         else:
             return DataLoader(
@@ -1434,6 +1449,7 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
                 shuffle=True,
                 num_workers=self.num_workers,
                 persistent_workers=True if self.num_workers > 0 else False,
+                pin_memory=True if torch.cuda.is_available() else False,
             )
 
     def val_dataloader(self):
@@ -1443,12 +1459,14 @@ class BeeWaspWeightedDataModule(pl.LightningDataModule):
             shuffle=False,
             num_workers=self.num_workers,
             persistent_workers=True if self.num_workers > 0 else False,
+            pin_memory=True if torch.cuda.is_available() else False,
         )
 
     def test_dataloader(self):
         return self.val_dataloader()
 
     def get_class_info(self):
+        """Get class names and counts"""
         return self.class_names, self.class_counts
 
 
@@ -1491,7 +1509,7 @@ def load_imbalanced_data(
         raise FileNotFoundError(f"Dataset path does not exist: {path}")
 
     print("******************************************************************")
-    print("Load imbalanced data:")
+    print("Load imbalanced data (OPTIMIZED VERSION):")
     print(f"  - Loading the dataset from: {path}.")
     print(f"  - Using a batch size of: {batch_size}.")
     print(f"  - Resizing input images to: {shape}.")
@@ -1500,7 +1518,7 @@ def load_imbalanced_data(
     print(f"  - Using weighted sampler: {use_weighted_sampler}")
     print("******************************************************************")
 
-    # Create DataModule
+    # Create optimized DataModule
     data_module = BeeWaspWeightedDataModule(
         data_path=path,
         batch_size=batch_size,
